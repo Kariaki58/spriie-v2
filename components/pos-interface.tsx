@@ -48,6 +48,8 @@ import {
 } from "@/components/ui/dialog"
 import { formatCurrency, formatCurrencyCompact } from "@/lib/utils"
 import { posProducts, type POSCartItem, createTransaction, type POSTransaction } from "@/lib/pos-data"
+import { storeTransaction, getStoredTransactions, updateTransactionStatus } from "@/lib/transaction-storage"
+import { getTestTransactions, TEST_TRANSACTION_IDS } from "@/lib/test-transactions"
 
 export function POSInterface() {
   const [cart, setCart] = React.useState<POSCartItem[]>([])
@@ -57,6 +59,50 @@ export function POSInterface() {
   const [showQRCode, setShowQRCode] = React.useState(false)
   const [currentTransaction, setCurrentTransaction] = React.useState<POSTransaction | null>(null)
   const [transactions, setTransactions] = React.useState<POSTransaction[]>([])
+
+  // Load transactions from storage on mount
+  React.useEffect(() => {
+    const stored = getStoredTransactions()
+    setTransactions(stored)
+  }, [])
+
+  // Listen for storage changes to sync payment status updates
+  React.useEffect(() => {
+    const handleStorageChange = () => {
+      const stored = getStoredTransactions()
+      setTransactions(stored)
+      // Update current transaction if it exists
+      if (currentTransaction) {
+        const updated = stored.find((t) => t.id === currentTransaction.id)
+        if (updated) {
+          setCurrentTransaction(updated)
+          // Close QR dialog if payment is completed
+          if (updated.paymentStatus === "paid") {
+            setShowQRCode(false)
+            setCart([])
+            setPaymentMethod("cash")
+            setCurrentTransaction(null)
+            toast.success("Payment completed!")
+          }
+        }
+      }
+    }
+
+    window.addEventListener("storage", handleStorageChange)
+    // Also check periodically for updates (in case of same-tab updates)
+    const interval = setInterval(() => {
+      const stored = getStoredTransactions()
+      const hasChanges = JSON.stringify(stored) !== JSON.stringify(transactions)
+      if (hasChanges) {
+        handleStorageChange()
+      }
+    }, 1000)
+
+    return () => {
+      window.removeEventListener("storage", handleStorageChange)
+      clearInterval(interval)
+    }
+  }, [currentTransaction, transactions])
 
   const filteredProducts = React.useMemo(() => {
     return posProducts.filter((product) => {
@@ -126,14 +172,32 @@ export function POSInterface() {
       return
     }
 
-    const transaction = createTransaction(cart, paymentMethod)
-    setCurrentTransaction(transaction)
-    setTransactions([...transactions, transaction])
-
     if (paymentMethod === "transfer") {
-      setShowQRCode(true)
-      toast.success("Transaction created. Please scan QR code to pay.")
+      // Use a random test transaction ID for QR code generation
+      const randomTestId = TEST_TRANSACTION_IDS[Math.floor(Math.random() * TEST_TRANSACTION_IDS.length)]
+      const testTransactions = getTestTransactions()
+      const testTransaction = testTransactions.find(t => t.id === randomTestId)
+      
+      if (testTransaction) {
+        // Use the test transaction for QR code
+        setCurrentTransaction(testTransaction)
+        setShowQRCode(true)
+        toast.success("QR code generated. Please scan to pay.")
+      } else {
+        // Fallback to creating a new transaction if test transaction not found
+        const transaction = createTransaction(cart, paymentMethod)
+        storeTransaction(transaction)
+        setCurrentTransaction(transaction)
+        setTransactions([...transactions, transaction])
+        setShowQRCode(true)
+        toast.success("Transaction created. Please scan QR code to pay.")
+      }
     } else {
+      // For cash payments, create a normal transaction
+      const transaction = createTransaction(cart, paymentMethod)
+      storeTransaction(transaction)
+      setCurrentTransaction(transaction)
+      setTransactions([...transactions, transaction])
       toast.success("Transaction completed. Payment received in cash.")
       setCart([])
       setPaymentMethod("cash")
@@ -142,10 +206,12 @@ export function POSInterface() {
 
   const handlePaymentComplete = () => {
     if (currentTransaction) {
+      const paidAt = new Date().toISOString()
+      updateTransactionStatus(currentTransaction.id, "paid", paidAt)
       setTransactions(
         transactions.map((t) =>
           t.id === currentTransaction.id
-            ? { ...t, paymentStatus: "paid" as const, paidAt: new Date().toISOString() }
+            ? { ...t, paymentStatus: "paid" as const, paidAt }
             : t
         )
       )
@@ -158,10 +224,12 @@ export function POSInterface() {
   }
 
   const handleMarkAsPaid = (transactionId: string) => {
+    const paidAt = new Date().toISOString()
+    updateTransactionStatus(transactionId, "paid", paidAt)
     setTransactions(
       transactions.map((t) =>
         t.id === transactionId
-          ? { ...t, paymentStatus: "paid" as const, paidAt: new Date().toISOString() }
+          ? { ...t, paymentStatus: "paid" as const, paidAt }
           : t
       )
     )
@@ -554,6 +622,9 @@ export function POSInterface() {
                   />
                   <div className="text-xs text-center mt-2 text-muted-foreground font-mono">
                     {currentTransaction.transactionNumber}
+                  </div>
+                  <div className="text-[10px] text-center mt-1 text-muted-foreground break-all max-w-[200px] px-2">
+                    {currentTransaction.qrCode}
                   </div>
                 </div>
               </div>

@@ -39,8 +39,8 @@ export function NavMain({
                 )}
               >
                 <Link href={item.url} className="flex items-center gap-3">
-                  {item.icon && <item.icon />}
-                  <span>{item.title}</span>
+                {item.icon && <item.icon />}
+                <span>{item.title}</span>
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>

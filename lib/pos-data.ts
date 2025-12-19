@@ -1,4 +1,5 @@
 import { dummyProducts } from "./dummy-data"
+import { getAppBaseUrl } from "./app-url"
 
 export interface POSCartItem {
   productId: string
@@ -22,9 +23,11 @@ export interface POSTransaction {
   paidAt?: string
 }
 
-// Generate QR code data (in real app, this would be a payment link)
-function generateQRCodeData(transactionId: string, amount: number): string {
-  return `https://payment.example.com/pay?txn=${transactionId}&amount=${amount}&currency=NGN`
+// Generate QR code data - points to the application's payment page
+// Only includes transaction ID - transaction data is looked up on the payment page
+export function generateQRCodeData(transactionId: string): string {
+  const baseUrl = getAppBaseUrl()
+  return `${baseUrl}/payment/${transactionId}`
 }
 
 export function createTransaction(
@@ -37,7 +40,7 @@ export function createTransaction(
   const transactionId = `TXN-${Date.now()}`
   const transactionNumber = `POS-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${Math.floor(Math.random() * 1000)}`
 
-  return {
+  const transaction: POSTransaction = {
     id: transactionId,
     transactionNumber,
     items,
@@ -46,10 +49,17 @@ export function createTransaction(
     total,
     paymentMethod,
     paymentStatus: paymentMethod === "cash" ? "paid" : "pending",
-    qrCode: paymentMethod === "transfer" ? generateQRCodeData(transactionId, total) : undefined,
+    qrCode: undefined, // Will be set after transaction is created
     createdAt: new Date().toISOString(),
     paidAt: paymentMethod === "cash" ? new Date().toISOString() : undefined,
   }
+
+  // Generate QR code with just the transaction ID
+  if (paymentMethod === "transfer") {
+    transaction.qrCode = generateQRCodeData(transaction.id)
+  }
+
+  return transaction
 }
 
 export const posProducts = dummyProducts.map((product) => ({
