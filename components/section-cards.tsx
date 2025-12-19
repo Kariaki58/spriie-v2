@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils"
 const cardData = [
   {
     id: 1,
-    title: "$1,250.00",
+    title: "₦1,250.00",
     description: "Total Revenue",
     badge: {
       icon: IconTrendingUp,

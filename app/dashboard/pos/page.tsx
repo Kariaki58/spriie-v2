@@ -1,15 +1,15 @@
+"use client"
+
+import * as React from "react"
 import { AppSidebar } from "@/components/app-sidebar"
-import { DashboardMetrics } from "@/components/dashboard-metrics"
-import { SalesChart } from "@/components/sales-chart"
-import { ConversionChart } from "@/components/conversion-chart"
-import { ProductViewsChart } from "@/components/product-views-chart"
 import { SiteHeader } from "@/components/site-header"
 import {
   SidebarInset,
   SidebarProvider,
 } from "@/components/ui/sidebar"
+import { POSInterface } from "@/components/pos-interface"
 
-export default function Page() {
+export default function POSPage() {
   return (
     <SidebarProvider
       style={
@@ -24,15 +24,14 @@ export default function Page() {
         <SiteHeader />
         <div className="flex flex-1 flex-col">
           <div className="@container/main flex flex-1 flex-col gap-2">
-            <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
-              <DashboardMetrics />
-              <div className="grid grid-cols-1 gap-4 px-4 lg:grid-cols-2 lg:px-6">
-                <SalesChart />
-                <ConversionChart />
+            <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6 px-4 lg:px-6">
+              <div>
+                <h2 className="text-2xl font-bold tracking-tight">Point of Sale</h2>
+                <p className="text-muted-foreground">
+                  Process sales and manage payments
+                </p>
               </div>
-              <div className="px-4 lg:px-6">
-                <ProductViewsChart />
-              </div>
+              <POSInterface />
             </div>
           </div>
         </div>
@@ -40,3 +39,4 @@ export default function Page() {
     </SidebarProvider>
   )
 }
+
