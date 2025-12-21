@@ -4,7 +4,6 @@ import * as React from "react"
 import {
   IconDotsVertical,
   IconEdit,
-  IconPlus,
   IconSearch,
   IconTrash,
 } from "@tabler/icons-react"
@@ -47,19 +46,41 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { formatCurrency } from "@/lib/utils"
+import { AddProductModal } from "@/components/add-product-modal"
+import { EditProductModal } from "@/components/edit-product-modal"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { formatCurrency, formatCurrencyCompact } from "@/lib/utils"
-import { dummyProducts, type Product } from "@/lib/dummy-data"
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+
+interface Product {
+  _id: string
+  name: string
+  description?: string
+  price: number
+  category: string
+  image?: string
+  images?: string[]
+  stock: number
+  views: number
+  sold: number
+  revenue: number
+  variants: Array<{
+    attributes?: Array<{ name: string; value: string }>
+    stock: number
+    price: number
+    sku?: string
+  }>
+  createdAt?: string
+  updatedAt?: string
+}
 
 const columns: ColumnDef<Product>[] = [
   {
@@ -94,7 +115,7 @@ const columns: ColumnDef<Product>[] = [
     accessorKey: "price",
     header: "Price",
     cell: ({ row }) => {
-      return formatCurrencyCompact(row.original.price)
+      return formatCurrency(row.original.price)
     },
   },
   {
@@ -149,48 +170,137 @@ const columns: ColumnDef<Product>[] = [
       )
     },
   },
-  {
-    id: "actions",
-    cell: ({ row }) => {
-      const product = row.original
-      return (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="h-8 w-8 p-0">
-              <span className="sr-only">Open menu</span>
-              <IconDotsVertical className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => toast.info("Edit functionality coming soon")}>
-              <IconEdit className="mr-2 h-4 w-4" />
-              Edit
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={() => toast.error("Delete functionality coming soon")}
-              className="text-destructive"
-            >
-              <IconTrash className="mr-2 h-4 w-4" />
-              Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )
-    },
-  },
 ]
 
 export function ProductsTable() {
-  const [data, setData] = React.useState(dummyProducts)
+  const [data, setData] = React.useState<Product[]>([])
+  const [isLoading, setIsLoading] = React.useState(true)
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [searchQuery, setSearchQuery] = React.useState("")
   const [categoryFilter, setCategoryFilter] = React.useState<string>("all")
+  
+  // Edit modal state
+  const [editingProduct, setEditingProduct] = React.useState<Product | null>(null)
+  const [isEditModalOpen, setIsEditModalOpen] = React.useState(false)
+  
+  // Delete confirmation state
+  const [deletingProduct, setDeletingProduct] = React.useState<Product | null>(null)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false)
+
+  // Fetch products from database
+  const fetchProducts = React.useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const response = await fetch('/api/products')
+      if (!response.ok) throw new Error('Failed to fetch products')
+      const result = await response.json()
+      setData(result.products || [])
+    } catch (error) {
+      console.error('Error fetching products:', error)
+      toast.error('Failed to load products')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    fetchProducts()
+  }, [fetchProducts])
+
+  // Handle edit
+  const handleEdit = (product: Product) => {
+    setEditingProduct(product)
+    setIsEditModalOpen(true)
+  }
+
+  // Handle delete
+  const handleDeleteClick = (product: Product) => {
+    setDeletingProduct(product)
+    setIsDeleteDialogOpen(true)
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!deletingProduct) return
+    
+    try {
+      const response = await fetch(`/api/products/${deletingProduct._id}`, {
+        method: 'DELETE'
+      })
+      
+      if (!response.ok) throw new Error('Failed to delete product')
+      
+      // Optimistically update UI
+      setData(prev => prev.filter(p => p._id !== deletingProduct._id))
+      toast.success('Product deleted successfully')
+    } catch (error) {
+      console.error('Error deleting product:', error)
+      toast.error('Failed to delete product')
+    } finally {
+      setIsDeleteDialogOpen(false)
+      setDeletingProduct(null)
+    }
+  }
+
+  // Filter data based on search and category
+  const filteredData = React.useMemo(() => {
+    let filtered = data
+
+    // Apply category filter
+    if (categoryFilter !== "all") {
+      filtered = filtered.filter(p => p.category === categoryFilter)
+    }
+
+    // Apply search filter
+    if (searchQuery) {
+      filtered = filtered.filter(p => 
+        p.name.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    }
+
+    return filtered
+  }, [data, categoryFilter, searchQuery])
+
+  const columnsWithActions: ColumnDef<Product>[] = React.useMemo(
+    () => [
+      ...columns,
+      {
+        id: "actions",
+        cell: ({ row }) => {
+          const product = row.original
+          return (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="h-8 w-8 p-0">
+                  <span className="sr-only">Open menu</span>
+                  <IconDotsVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleEdit(product)}>
+                  <IconEdit className="mr-2 h-4 w-4" />
+                  Edit
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => handleDeleteClick(product)}
+                  className="text-destructive"
+                >
+                  <IconTrash className="mr-2 h-4 w-4" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )
+        },
+      },
+    ],
+    []
+  )
 
   const table = useReactTable({
-    data,
-    columns,
+    data: filteredData,
+    columns: columnsWithActions,
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     getCoreRowModel: getCoreRowModel(),
@@ -202,18 +312,6 @@ export function ProductsTable() {
       columnFilters,
     },
   })
-
-  React.useEffect(() => {
-    table.getColumn("name")?.setFilterValue(searchQuery)
-  }, [searchQuery, table])
-
-  React.useEffect(() => {
-    if (categoryFilter === "all") {
-      table.getColumn("category")?.setFilterValue(undefined)
-    } else {
-      table.getColumn("category")?.setFilterValue(categoryFilter)
-    }
-  }, [categoryFilter, table])
 
   const categories = React.useMemo(() => {
     const cats = new Set(data.map((p) => p.category))
@@ -230,7 +328,7 @@ export function ProductsTable() {
           </p>
         </div>
         <div className="flex-shrink-0">
-          <AddProductDialog />
+          <AddProductModal onSuccess={fetchProducts} />
         </div>
       </div>
       <div className="flex items-center gap-4">
@@ -278,7 +376,16 @@ export function ProductsTable() {
             ))}
           </TableHeader>
           <TableBody>
-            {table.getRowModel().rows?.length ? (
+            {isLoading ? (
+              <TableRow>
+                <TableCell
+                  colSpan={columnsWithActions.length}
+                  className="h-24 text-center"
+                >
+                  Loading products...
+                </TableCell>
+              </TableRow>
+            ) : table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (
                 <TableRow
                   key={row.id}
@@ -298,7 +405,7 @@ export function ProductsTable() {
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={columns.length}
+                  colSpan={columnsWithActions.length}
                   className="h-24 text-center"
                 >
                   No products found.
@@ -308,6 +415,34 @@ export function ProductsTable() {
           </TableBody>
         </Table>
       </div>
+      
+      {/* Edit Modal */}
+      {editingProduct && (
+        <EditProductModal
+          product={editingProduct}
+          open={isEditModalOpen}
+          onOpenChange={setIsEditModalOpen}
+          onSuccess={fetchProducts}
+        />
+      )}
+      
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete &quot;{deletingProduct?.name}&quot;. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div className="flex items-center justify-end space-x-2">
         <Button
           variant="outline"
@@ -330,128 +465,6 @@ export function ProductsTable() {
   )
 }
 
-function AddProductDialog() {
-  const [open, setOpen] = React.useState(false)
-  const [formData, setFormData] = React.useState({
-    name: "",
-    description: "",
-    price: "",
-    category: "",
-    stock: "",
-    image: "",
-  })
+// function AddProductDialog() { ... } replaced by AddProductModal import
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    toast.success("Product added successfully!")
-    setOpen(false)
-    setFormData({
-      name: "",
-      description: "",
-      price: "",
-      category: "",
-      stock: "",
-      image: "",
-    })
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button className="w-full sm:w-auto">
-          <IconPlus className="mr-2 h-4 w-4" />
-          Add Product
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Add New Product</DialogTitle>
-          <DialogDescription>
-            Add a new product to your store. Fill in all the details below.
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="name">Product Name</Label>
-            <Input
-              id="name"
-              value={formData.name}
-              onChange={(e) =>
-                setFormData({ ...formData, name: e.target.value })
-              }
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="description">Description</Label>
-            <Textarea
-              id="description"
-              value={formData.description}
-              onChange={(e) =>
-                setFormData({ ...formData, description: e.target.value })
-              }
-              required
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="price">Price (₦)</Label>
-              <Input
-                id="price"
-                type="number"
-                step="0.01"
-                value={formData.price}
-                onChange={(e) =>
-                  setFormData({ ...formData, price: e.target.value })
-                }
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="stock">Stock</Label>
-              <Input
-                id="stock"
-                type="number"
-                value={formData.stock}
-                onChange={(e) =>
-                  setFormData({ ...formData, stock: e.target.value })
-                }
-                required
-              />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="category">Category</Label>
-            <Input
-              id="category"
-              value={formData.category}
-              onChange={(e) =>
-                setFormData({ ...formData, category: e.target.value })
-              }
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="image">Image URL</Label>
-            <Input
-              id="image"
-              type="url"
-              value={formData.image}
-              onChange={(e) =>
-                setFormData({ ...formData, image: e.target.value })
-              }
-              required
-            />
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button type="submit">Add Product</Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  )
-}
 

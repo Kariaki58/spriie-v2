@@ -11,7 +11,6 @@ import {
   IconReceipt,
   IconSearch,
   IconSettings,
-  IconUsers,
   IconUserCircle,
   IconWallet,
 } from "@tabler/icons-react"
@@ -32,13 +31,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 
-const data = {
-  user: {
-    name: "Store Owner",
-    email: "owner@store.com",
-    avatar: "/avatars/user.jpg",
-  },
-  navMain: [
+const navMain = [
     {
       title: "Dashboard",
       url: "/dashboard",
@@ -70,34 +63,29 @@ const data = {
       icon: IconChartBar,
     },
     {
-      title: "Team",
-      url: "/dashboard/team",
-      icon: IconUsers,
-    },
-    {
       title: "Wallet",
       url: "/dashboard/wallet",
       icon: IconWallet,
     },
-  ],
-  navSecondary: [
-    {
-      title: "Settings",
-      url: "/dashboard/settings",
-      icon: IconSettings,
-    },
-    {
-      title: "Get Help",
-      url: "#",
-      icon: IconHelp,
-    },
-    {
-      title: "Search",
-      url: "#",
-      icon: IconSearch,
-    },
-  ],
-}
+  ]
+
+const navSecondary = [
+  {
+    title: "Settings",
+    url: "/dashboard/settings",
+    icon: IconSettings,
+  },
+  {
+    title: "Get Help",
+    url: "#",
+    icon: IconHelp,
+  },
+  {
+    title: "Search",
+    url: "#",
+    icon: IconSearch,
+  },
+]
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { theme } = useThemeConfig()
@@ -133,11 +121,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <NavMain items={data.navMain.map(item => ({ ...item, isActive: pathname === item.url }))} />
-        <NavSecondary items={data.navSecondary} className="mt-auto" />
+        <NavMain items={navMain.map(item => ({ ...item, isActive: pathname === item.url }))} />
+        <NavSecondary items={navSecondary} className="mt-auto" />
       </SidebarContent>
       <SidebarFooter>
-        <NavUser user={data.user} />
+        <NavUser />
       </SidebarFooter>
     </Sidebar>
   )

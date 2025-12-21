@@ -8,6 +8,7 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar"
 import { ProductsTable } from "@/components/products-table"
+import { ProductStatsCards } from "@/components/product-stats-cards"
 
 export default function ProductsPage() {
   return (
@@ -25,6 +26,9 @@ export default function ProductsPage() {
         <div className="flex flex-1 flex-col">
           <div className="@container/main flex flex-1 flex-col gap-2">
             <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
+              <div className="px-4 lg:px-6">
+                <ProductStatsCards />
+              </div>
               <ProductsTable />
             </div>
           </div>
@@ -33,10 +37,3 @@ export default function ProductsPage() {
     </SidebarProvider>
   )
 }
-
-
-
-
-
-
-

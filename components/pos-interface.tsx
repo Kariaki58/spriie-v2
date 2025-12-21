@@ -5,6 +5,7 @@ import {
   IconMinus,
   IconPlus,
   IconQrcode,
+  IconRefresh,
   IconSearch,
   IconShoppingCart,
   IconTrash,
@@ -59,12 +60,17 @@ export function POSInterface() {
   const [showQRCode, setShowQRCode] = React.useState(false)
   const [currentTransaction, setCurrentTransaction] = React.useState<POSTransaction | null>(null)
   const [transactions, setTransactions] = React.useState<POSTransaction[]>([])
+  const [isLoadingTransactions, setIsLoadingTransactions] = React.useState(false)
 
   // Load transactions from storage on mount
-  React.useEffect(() => {
+  const loadTransactions = React.useCallback(() => {
     const stored = getStoredTransactions()
     setTransactions(stored)
   }, [])
+
+  React.useEffect(() => {
+    loadTransactions()
+  }, [loadTransactions])
 
   // Listen for storage changes to sync payment status updates
   React.useEffect(() => {
@@ -236,26 +242,53 @@ export function POSInterface() {
     toast.success("Payment marked as paid")
   }
 
+  const handleReloadTransactions = () => {
+    setIsLoadingTransactions(true)
+    loadTransactions()
+    setTimeout(() => {
+      setIsLoadingTransactions(false)
+      toast.success("Transactions reloaded")
+    }, 500)
+  }
+
   return (
-    <div className="flex flex-col h-screen gap-4 p-2 sm:p-4">
-      {/* Transactions Section - At the top */}
-      {/* {transactions.length > 0 && (
-        <div className="h-5xl flex-shrink-0 border rounded-lg bg-card">
-          <Card className="border-0 shadow-none h-full flex flex-col">
-            <CardHeader className="pb-3 flex-shrink-0">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-lg">Recent Transactions</CardTitle>
-                  <CardDescription className="text-xs mt-1">
-                    {transactions.length} {transactions.length === 1 ? "transaction" : "transactions"}
-                  </CardDescription>
-                </div>
-                <Badge variant="secondary">
-                  {transactions.filter(t => t.paymentStatus === "paid").length} Paid
-                </Badge>
+    <div className="flex flex-col min-h-screen lg:h-screen gap-4 p-2 sm:p-4 pb-4">
+      {/* Transactions Section - Fixed height container */}
+      <div className="h-96 flex-shrink-0 border rounded-lg bg-card overflow-hidden">
+        <Card className="border-0 shadow-none h-full flex flex-col">
+          <CardHeader className="pb-3 flex-shrink-0 border-b bg-muted/30">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  Recent Transactions
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={handleReloadTransactions}
+                    disabled={isLoadingTransactions}
+                  >
+                    <IconRefresh className={`h-3.5 w-3.5 ${isLoadingTransactions ? 'animate-spin' : ''}`} />
+                  </Button>
+                </CardTitle>
+                <CardDescription className="text-xs mt-1">
+                  {transactions.length} {transactions.length === 1 ? "transaction" : "transactions"}
+                </CardDescription>
               </div>
-            </CardHeader>
-            <CardContent className="flex-1 overflow-y-auto">
+              <Badge variant="secondary">
+                {transactions.filter(t => t.paymentStatus === "paid").length} Paid
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="flex-1 overflow-y-auto p-4">
+            {transactions.length === 0 ? (
+              <div className="flex h-full items-center justify-center text-muted-foreground">
+                <div className="text-center">
+                  <p className="text-sm font-medium">No transactions yet</p>
+                  <p className="text-xs mt-1">Complete a sale to see transactions here</p>
+                </div>
+              </div>
+            ) : (
               <div className="space-y-2">
                 {transactions.map((transaction) => (
                   <div
@@ -273,7 +306,7 @@ export function POSInterface() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 ml-4">
+                    <div className="flex items-center gap-2 ml-4 flex-shrink-0">
                       <Badge
                         className={
                           transaction.paymentStatus === "paid"
@@ -293,17 +326,16 @@ export function POSInterface() {
                                 setCurrentTransaction(transaction)
                                 setShowQRCode(true)
                               }}
-                              className="h-8"
+                              className="h-8 px-2"
                             >
-                              <IconQrcode className="h-3.5 w-3.5 mr-1.5" />
-                              QR
+                              <IconQrcode className="h-3.5 w-3.5" />
                             </Button>
                           )}
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => handleMarkAsPaid(transaction.id)}
-                            className="h-8"
+                            className="h-8 text-xs"
                           >
                             Mark Paid
                           </Button>
@@ -313,15 +345,15 @@ export function POSInterface() {
                   </div>
                 ))}
               </div>
-            </CardContent>
-          </Card>
-        </div>
-      )} */}
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Main POS Interface - Products and Cart */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-4">
+      <div className="flex-1 min-h-[600px] lg:min-h-0 flex flex-col lg:flex-row gap-4 ">
         {/* Products Section - Table */}
-        <div className="flex-1 flex flex-col border rounded-lg bg-card overflow-hidden min-h-0">
+        <div className="flex-1 flex flex-col border rounded-lg bg-card overflow-hidden min-h-[500px]">
           {/* Search and Filter Header */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 p-3 sm:p-4 border-b bg-muted/30 flex-shrink-0">
             <div className="relative flex-1">
@@ -477,8 +509,8 @@ export function POSInterface() {
           </div>
         </div>
 
-        {/* Cart Section */}
-        <div className="w-full lg:w-96 flex-shrink-0 flex flex-col border rounded-lg bg-card overflow-hidden h-[400px] lg:h-auto">
+        {/* Cart Section - Fixed height */}
+        <div className="w-full lg:w-96 flex-shrink-0 flex flex-col border rounded-lg bg-card overflow-hidden min-h-[400px] lg:h-auto">
           <Card className="border-0 shadow-none h-full flex flex-col">
             {/* Cart Header */}
             <CardHeader className="pb-3 flex-shrink-0 border-b bg-muted/30">

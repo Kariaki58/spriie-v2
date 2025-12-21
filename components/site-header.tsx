@@ -14,7 +14,6 @@ const pageTitles: Record<string, string> = {
   "/dashboard/customers": "Customers",
   "/dashboard/analytics": "Analytics",
   "/dashboard/settings": "Settings",
-  "/dashboard/team": "Team",
 }
 
 export function SiteHeader() {

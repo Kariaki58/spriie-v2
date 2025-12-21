@@ -3,8 +3,6 @@
 import * as React from "react"
 import {
   IconSearch,
-  IconArrowUpRight,
-  IconArrowDownLeft,
   IconFilter,
   IconArrowsSort,
 } from "@tabler/icons-react"
@@ -159,7 +157,7 @@ export function WalletTransactionsTable({ transactions }: WalletTransactionsTabl
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-         <div className="relative flex-1 max-w-sm">
+         <div className="relative w-full sm:flex-1 sm:max-w-sm">
             <IconSearch className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Search transactions..."
@@ -170,7 +168,7 @@ export function WalletTransactionsTable({ transactions }: WalletTransactionsTabl
           </div>
           <div className="flex items-center gap-2">
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[150px]">
+                <SelectTrigger className="w-full sm:w-[150px]">
                     <div className="flex items-center gap-2">
                         <IconFilter className="h-4 w-4 text-muted-foreground" />
                         <SelectValue placeholder="Filter Status" />

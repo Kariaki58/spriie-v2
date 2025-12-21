@@ -7,7 +7,7 @@ import {
   SidebarInset,
   SidebarProvider,
 } from "@/components/ui/sidebar"
-import { POSInterface } from "@/components/pos-interface"
+import { POSInterface } from "@/components/pos/pos-interface"
 
 export default function POSPage() {
   return (
