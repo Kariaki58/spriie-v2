@@ -4,12 +4,10 @@ import * as React from "react"
 import {
   IconChartBar,
   IconDashboard,
-  IconHelp,
   IconInnerShadowTop,
   IconPackage,
   IconPoint,
   IconReceipt,
-  IconSearch,
   IconSettings,
   IconUserCircle,
   IconWallet,
@@ -74,16 +72,6 @@ const navSecondary = [
     title: "Settings",
     url: "/dashboard/settings",
     icon: IconSettings,
-  },
-  {
-    title: "Get Help",
-    url: "#",
-    icon: IconHelp,
-  },
-  {
-    title: "Search",
-    url: "#",
-    icon: IconSearch,
   },
 ]
 

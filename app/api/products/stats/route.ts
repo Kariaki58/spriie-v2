@@ -16,7 +16,7 @@ export async function GET() {
     const totalInventoryValue = products.reduce((sum, p) => {
       if (p.variants && p.variants.length > 0) {
         // Sum up value of all variants (variant.price × variant.stock)
-        const variantValue = p.variants.reduce((variantSum, variant) => {
+        const variantValue = p.variants.reduce((variantSum: number, variant) => {
           return variantSum + ((variant.price || p.price) * (variant.stock || 0))
         }, 0)
         return sum + variantValue
