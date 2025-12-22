@@ -12,7 +12,7 @@ export default function AccountPage() {
 
   const handleLogout = async () => {
     await signOut({ redirect: false })
-    router.push("/auth/google")
+    router.push("/auth/login")
   }
 
   if (status === "loading") {
@@ -29,7 +29,7 @@ export default function AccountPage() {
         <div className="flex flex-col items-center gap-4">
           <h1 className="text-2xl font-bold">Please sign in</h1>
           <Button asChild>
-            <Link href="/auth/google">Sign in with Google</Link>
+            <Link href="/auth/login">Sign in</Link>
           </Button>
         </div>
       </div>

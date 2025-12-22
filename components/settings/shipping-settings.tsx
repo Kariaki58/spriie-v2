@@ -43,7 +43,7 @@ const selectClassName = "w-full rounded border border-gray-300 px-3 py-2 dark:bo
 export function ShippingSettings() {
   const [countryid, setCountryid] = useState(0)
   const [stateid, setStateid] = useState(0)
-
+  const [cityid, setCityid] = useState(0)
 
   const [countryName, setCountryName] = useState("")
   const [stateName, setStateName] = useState("")
@@ -242,6 +242,7 @@ export function ShippingSettings() {
                   countryid={countryid}
                   stateid={stateid}
                   onChange={(e: { id: number; name: string }) => {
+                    setCityid(e.id)
                     setCityName(e.name)
                   }}
                   placeHolder="Select City"

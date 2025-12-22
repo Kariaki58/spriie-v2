@@ -1,55 +1,60 @@
 import { NextAuthOptions } from "next-auth"
-import GoogleProvider from "next-auth/providers/google"
+import CredentialsProvider from "next-auth/providers/credentials"
+import bcrypt from "bcryptjs"
 import dbConnect from "./db"
 import User from "./models/user"
 
 export const authOptions: NextAuthOptions = {
   providers: [
-    GoogleProvider({
-      clientId: process.env.AUTH_GOOGLE_ID!,
-      clientSecret: process.env.AUTH_GOOGLE_SECRET!,
+    CredentialsProvider({
+      name: "Credentials",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" },
+      },
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials?.password) {
+          throw new Error("Email and password are required")
+        }
+
+        try {
+          await dbConnect()
+          
+          // Find user by email and include password field
+          const user = await User.findOne({ email: credentials.email }).select("+password")
+          
+          if (!user) {
+            throw new Error("Invalid email or password")
+          }
+
+          // Check if user has a password (for existing OAuth users)
+          if (!user.password) {
+            throw new Error("Please set a password for your account")
+          }
+
+          // Verify password
+          const isPasswordValid = await bcrypt.compare(credentials.password, user.password)
+          
+          if (!isPasswordValid) {
+            throw new Error("Invalid email or password")
+          }
+
+          // Return user object (without password)
+          return {
+            id: user._id.toString(),
+            email: user.email,
+            name: user.name,
+            // Don't include image/avatar - use default fallback
+          }
+        } catch (error: any) {
+          console.error("Auth error:", error)
+          throw new Error(error.message || "Authentication failed")
+        }
+      },
     }),
   ],
   secret: process.env.AUTH_SECRET,
   callbacks: {
-    async signIn({ user, account, profile }) {
-      if (account?.provider === "google" && user.email) {
-        try {
-          await dbConnect()
-          
-          // Check if user exists
-          const existingUser = await User.findOne({ email: user.email })
-          
-          if (!existingUser) {
-            // Determine role based on admin emails
-            const adminEmails = process.env.ADMIN_EMAILS?.split(",").map(e => e.trim()) || []
-            const isAdmin = adminEmails.includes(user.email)
-            
-            // Create new user
-            await User.create({
-              name: user.name || "User",
-              email: user.email,
-              avatar: user.image,
-              role: isAdmin ? "admin" : "customer",
-              status: "active",
-            })
-          } else {
-            // Update user info if needed (avatar, name might have changed)
-            if (user.image && existingUser.avatar !== user.image) {
-              existingUser.avatar = user.image
-            }
-            if (user.name && existingUser.name !== user.name) {
-              existingUser.name = user.name
-            }
-            await existingUser.save()
-          }
-        } catch (error) {
-          console.error("Error saving user to database:", error)
-          // Still allow sign in even if database save fails
-        }
-      }
-      return true
-    },
     async jwt({ token, user }) {
       // On first sign in, user object is available
       if (user?.email) {
@@ -76,12 +81,17 @@ export const authOptions: NextAuthOptions = {
         ;(session as any).userId = token.userId
         ;(session as any).role = token.role
         ;(session as any).isAdmin = token.isAdmin ?? false
+        // Remove image to use default avatar fallback
+        session.user.image = undefined
       }
       return session
     },
   },
   pages: {
-    signIn: "/auth/google",
+    signIn: "/auth/login",
+  },
+  session: {
+    strategy: "jwt",
   },
 }
 

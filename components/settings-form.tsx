@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { IconUpload } from "@tabler/icons-react"
+import { IconUpload, IconLoader } from "@tabler/icons-react"
 import { toast } from "sonner"
 import { useThemeConfig } from "@/contexts/theme-context"
 import { Button } from "@/components/ui/button"
@@ -24,6 +24,46 @@ export function SettingsForm() {
   const [primaryColor, setPrimaryColor] = React.useState(theme.primaryColor)
   const [accentColor, setAccentColor] = React.useState(theme.accentColor)
   const [logoPreview, setLogoPreview] = React.useState<string | null>(theme.logo)
+  const [isLoading, setIsLoading] = React.useState(false)
+  const [isSaving, setIsSaving] = React.useState(false)
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
+
+  React.useEffect(() => {
+    fetchSettings()
+  }, [])
+
+  const fetchSettings = async () => {
+    setIsLoading(true)
+    try {
+      const response = await fetch("/api/settings")
+      if (response.ok) {
+        const data = await response.json()
+        if (data.success && data.data) {
+          const settings = data.data
+          setStoreName(settings.storeName || "My Store")
+          setDomain(settings.domain || "")
+          setBackgroundColor(settings.backgroundColor || "#ffffff")
+          setPrimaryColor(settings.primaryColor || "#3b82f6")
+          setAccentColor(settings.accentColor || "#8b5cf6")
+          setLogoPreview(settings.logo || null)
+          
+          // Update theme context
+          updateTheme({
+            storeName: settings.storeName || "My Store",
+            domain: settings.domain || "",
+            backgroundColor: settings.backgroundColor || "#ffffff",
+            primaryColor: settings.primaryColor || "#3b82f6",
+            accentColor: settings.accentColor || "#8b5cf6",
+            logo: settings.logo || null,
+          })
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching settings:", error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -32,23 +72,53 @@ export function SettingsForm() {
       reader.onloadend = () => {
         const result = reader.result as string
         setLogoPreview(result)
-        updateTheme({ logo: result })
-        toast.success("Logo uploaded successfully!")
       }
       reader.readAsDataURL(file)
     }
   }
 
-  const handleSave = () => {
-    updateTheme({
-      storeName,
-      domain,
-      backgroundColor,
-      primaryColor,
-      accentColor,
-      logo: logoPreview,
-    })
-    toast.success("Settings saved successfully!")
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          storeName,
+          domain,
+          backgroundColor,
+          primaryColor,
+          accentColor,
+          logo: logoPreview,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        toast.error(data.error || "Failed to save settings")
+        return
+      }
+
+      // Update theme context
+      updateTheme({
+        storeName,
+        domain,
+        backgroundColor,
+        primaryColor,
+        accentColor,
+        logo: logoPreview,
+      })
+
+      toast.success("Settings saved successfully!")
+    } catch (error: any) {
+      console.error("Error saving settings:", error)
+      toast.error(error.message || "An error occurred while saving")
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   return (
@@ -92,20 +162,21 @@ export function SettingsForm() {
                 )}
                 <div className="flex-1">
                   <Input
+                    ref={fileInputRef}
                     id="logo"
                     type="file"
                     accept="image/*"
                     onChange={handleLogoUpload}
                     className="hidden"
                   />
-                  <Label htmlFor="logo" asChild>
-                    <Button variant="outline" type="button" asChild>
-                      <span>
-                        <IconUpload className="mr-2 h-4 w-4" />
-                        Upload Logo
-                      </span>
-                    </Button>
-                  </Label>
+                  <Button
+                    variant="outline"
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <IconUpload className="mr-2 h-4 w-4" />
+                    Upload Logo
+                  </Button>
                   <p className="text-sm text-muted-foreground mt-2">
                     Upload your store logo (PNG, JPG, or SVG)
                   </p>
@@ -223,7 +294,10 @@ export function SettingsForm() {
         </Card>
 
         <div className="flex justify-end">
-          <Button onClick={handleSave}>Save Changes</Button>
+          <Button onClick={handleSave} disabled={isSaving}>
+            {isSaving && <IconLoader className="mr-2 h-4 w-4 animate-spin" />}
+            {isSaving ? "Saving..." : "Save Changes"}
+          </Button>
         </div>
       </div>
     </div>
