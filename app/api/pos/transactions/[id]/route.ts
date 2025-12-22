@@ -9,17 +9,13 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
     await dbConnect()
     const { id } = await params
 
+    // Allow public access for customers to view transaction via QR code
+    // The transaction ID serves as the access token
     const transaction = await POSTransaction.findOne({
       _id: id,
-      user: (session as any).userId,
     })
 
     if (!transaction) {
@@ -45,10 +41,6 @@ export async function PATCH(
 ) {
   try {
     const session = await getServerSession(authOptions)
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
     const body = await req.json()
     const { items, subtotal, tax, total, cardDetails, paymentStatus, qrCode } = body
 
@@ -56,10 +48,19 @@ export async function PATCH(
     const { id } = await params
 
     // Find transaction
-    const transaction = await POSTransaction.findOne({
-      _id: id,
-      user: (session as any).userId,
-    })
+    let transaction
+    if (session?.user) {
+      // Authenticated requests: find by ID and user
+      transaction = await POSTransaction.findOne({
+        _id: id,
+        user: (session as any).userId,
+      })
+    } else {
+      // Unauthenticated requests: find by ID only (for customer payment completion)
+      transaction = await POSTransaction.findOne({
+        _id: id,
+      })
+    }
 
     if (!transaction) {
       return NextResponse.json(
@@ -68,6 +69,47 @@ export async function PATCH(
       )
     }
 
+    // If unauthenticated, only allow payment status updates
+    if (!session?.user) {
+      if (items || subtotal !== undefined || tax !== undefined || total !== undefined || qrCode || cardDetails) {
+        return NextResponse.json(
+          { error: "Unauthorized. Only payment status can be updated without authentication." },
+          { status: 401 }
+        )
+      }
+
+      // Allow payment status update for customers
+      if (paymentStatus) {
+        // Only allow updating to "paid" status
+        if (paymentStatus !== "paid") {
+          return NextResponse.json(
+            { error: "Only payment completion is allowed" },
+            { status: 400 }
+          )
+        }
+
+        // Only allow if transaction is currently pending
+        if (transaction.paymentStatus !== "pending") {
+          return NextResponse.json(
+            { error: "Transaction is not pending payment" },
+            { status: 400 }
+          )
+        }
+
+        transaction.paymentStatus = "paid"
+        transaction.paidAt = new Date()
+        await transaction.save()
+
+        return NextResponse.json({ success: true, data: transaction })
+      }
+
+      return NextResponse.json(
+        { error: "No valid update provided" },
+        { status: 400 }
+      )
+    }
+
+    // Authenticated requests: full update access
     // Check if transaction can be modified (only pending or failed)
     if (
       transaction.paymentStatus !== "pending" &&

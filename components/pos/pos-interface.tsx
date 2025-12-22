@@ -15,6 +15,7 @@ import {
   IconChevronsRight,
   IconArrowUp,
   IconArrowDown,
+  IconCheck,
 } from "@tabler/icons-react"
 import { QRCodeSVG } from "qrcode.react"
 import { toast } from "sonner"
@@ -64,6 +65,12 @@ interface Product {
   category: string
   image?: string
   stock?: number
+  variants?: Array<{
+    attributes?: Array<{ name: string; value: string }>
+    stock: number
+    price: number
+    sku?: string
+  }>
 }
 
 interface Transaction {
@@ -96,6 +103,7 @@ interface CartItem {
   productName: string
   price: number
   quantity: number
+  variant?: string
 }
 
 export function POSInterface() {
@@ -127,6 +135,11 @@ export function POSInterface() {
   const [currentTransaction, setCurrentTransaction] = React.useState<Transaction | null>(null)
   const [showCartDialog, setShowCartDialog] = React.useState(false)
   const [selectedTransactionForCart, setSelectedTransactionForCart] = React.useState<Transaction | null>(null)
+  
+  // Variant selection state
+  const [showVariantDialog, setShowVariantDialog] = React.useState(false)
+  const [productForVariant, setProductForVariant] = React.useState<Product | null>(null)
+  const [selectedVariantIndex, setSelectedVariantIndex] = React.useState<number | null>(null)
 
   // Load products
   const loadProducts = React.useCallback(async () => {
@@ -200,12 +213,44 @@ export function POSInterface() {
     loadTransactions()
   }, [loadTransactions])
 
-  const addToCart = (product: Product) => {
-    const existingItem = cart.find((item) => item.productId === product._id)
+  const addToCart = (product: Product, variantIndex: number | null = null) => {
+    let finalPrice = product.price
+    let variantString: string | undefined = undefined
+    
+    if (product.variants && product.variants.length > 0) {
+      if (variantIndex !== null && variantIndex >= 0 && variantIndex < product.variants.length) {
+        // Use selected variant
+        const variant = product.variants[variantIndex]
+        finalPrice = variant.price || product.price
+        // Store variant attributes as JSON string for proper storage
+        variantString = variant.attributes 
+          ? JSON.stringify(variant.attributes.map(attr => ({ name: attr.name, value: attr.value })))
+          : undefined
+      } else if (product.variants.length === 1) {
+        // Auto-select if only one variant
+        const variant = product.variants[0]
+        finalPrice = variant.price || product.price
+        variantString = variant.attributes 
+          ? JSON.stringify(variant.attributes.map(attr => ({ name: attr.name, value: attr.value })))
+          : undefined
+      } else {
+        // Multiple variants but none selected - show selection dialog
+        setProductForVariant(product)
+        setSelectedVariantIndex(null)
+        setShowVariantDialog(true)
+        return
+      }
+    }
+    
+    // Find existing item with same productId and variant (or both undefined)
+    const existingItem = cart.find((item) => 
+      item.productId === product._id && item.variant === variantString
+    )
+    
     if (existingItem) {
       setCart(
         cart.map((item) =>
-          item.productId === product._id
+          item.productId === product._id && item.variant === variantString
             ? { ...item, quantity: item.quantity + 1 }
             : item
         )
@@ -216,33 +261,85 @@ export function POSInterface() {
         {
           productId: product._id,
           productName: product.name,
-          price: product.price,
+          price: finalPrice,
           quantity: 1,
+          variant: variantString,
         },
       ])
     }
-    toast.success(`${product.name} added to cart`)
+    
+    const displayName = variantString ? `${product.name} (${variantString})` : product.name
+    toast.success(`${displayName} added to cart`)
+  }
+  
+  const handleVariantSelection = () => {
+    if (productForVariant && selectedVariantIndex !== null) {
+      addToCart(productForVariant, selectedVariantIndex)
+      setShowVariantDialog(false)
+      setProductForVariant(null)
+      setSelectedVariantIndex(null)
+    }
+  }
+  
+  const handleAddWithoutVariant = () => {
+    if (productForVariant) {
+      // Add with base price, no variant
+      const existingItem = cart.find((item) => 
+        item.productId === productForVariant._id && !item.variant
+      )
+      
+      if (existingItem) {
+        setCart(
+          cart.map((item) =>
+            item.productId === productForVariant._id && !item.variant
+              ? { ...item, quantity: item.quantity + 1 }
+              : item
+          )
+        )
+      } else {
+        setCart([
+          ...cart,
+          {
+            productId: productForVariant._id,
+            productName: productForVariant.name,
+            price: productForVariant.price,
+            quantity: 1,
+          },
+        ])
+      }
+      toast.success(`${productForVariant.name} added to cart`)
+      setShowVariantDialog(false)
+      setProductForVariant(null)
+      setSelectedVariantIndex(null)
+    }
   }
 
-  const removeFromCart = (productId: string) => {
-    setCart(cart.filter((item) => item.productId !== productId))
+  const removeFromCart = (productId: string, variant?: string) => {
+    setCart(cart.filter((item) => 
+      !(item.productId === productId && item.variant === variant)
+    ))
     toast.success("Item removed from cart")
   }
 
-  const updateQuantity = (productId: string, quantity: number) => {
+  const updateQuantity = (productId: string, quantity: number, variant?: string) => {
     if (quantity <= 0) {
-      removeFromCart(productId)
+      removeFromCart(productId, variant)
       return
     }
     setCart(
       cart.map((item) =>
-        item.productId === productId ? { ...item, quantity } : item
+        item.productId === productId && item.variant === variant
+          ? { ...item, quantity }
+          : item
       )
     )
   }
 
   const getCartQuantity = (productId: string) => {
-    return cart.find((item) => item.productId === productId)?.quantity || 0
+    // Sum quantities for all variants of this product
+    return cart
+      .filter((item) => item.productId === productId)
+      .reduce((sum, item) => sum + item.quantity, 0)
   }
 
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
@@ -773,7 +870,12 @@ export function POSInterface() {
                                     variant="outline"
                                     size="icon"
                                     className="h-7 w-7 sm:h-8 sm:w-8"
-                                    onClick={() => updateQuantity(product._id, cartQuantity - 1)}
+                                    onClick={() => {
+                                      const firstCartItem = cart.find(item => item.productId === product._id)
+                                      if (firstCartItem) {
+                                        updateQuantity(product._id, firstCartItem.quantity - 1, firstCartItem.variant)
+                                      }
+                                    }}
                                   >
                                     <IconMinus className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                                   </Button>
@@ -784,7 +886,15 @@ export function POSInterface() {
                                     variant="outline"
                                     size="icon"
                                     className="h-7 w-7 sm:h-8 sm:w-8"
-                                    onClick={() => updateQuantity(product._id, cartQuantity + 1)}
+                                    onClick={() => {
+                                      const firstCartItem = cart.find(item => item.productId === product._id)
+                                      if (firstCartItem) {
+                                        updateQuantity(product._id, firstCartItem.quantity + 1, firstCartItem.variant)
+                                      } else {
+                                        // If not in cart, try to add (will show variant dialog if needed)
+                                        addToCart(product)
+                                      }
+                                    }}
                                   >
                                     <IconPlus className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                                   </Button>
@@ -792,7 +902,11 @@ export function POSInterface() {
                                     variant="ghost"
                                     size="icon"
                                     className="h-7 w-7 sm:h-8 sm:w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                    onClick={() => removeFromCart(product._id)}
+                                    onClick={() => {
+                                      // Remove all variants of this product
+                                      setCart(cart.filter(item => item.productId !== product._id))
+                                      toast.success("Item removed from cart")
+                                    }}
                                   >
                                     <IconTrash className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                                   </Button>
@@ -892,12 +1006,37 @@ export function POSInterface() {
                     <div className="space-y-2">
                       {cart.map((item) => (
                         <div
-                          key={item.productId}
+                          key={`${item.productId}-${item.variant || 'base'}`}
                           className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3 rounded-lg border bg-muted/30 p-3 hover:bg-muted/50 transition-colors"
                         >
                           <div className="flex-1 min-w-0 w-full sm:w-auto">
                             <div className="font-medium text-sm truncate">{item.productName}</div>
-                            <div className="text-xs text-muted-foreground mt-0.5">
+                            {item.variant && (() => {
+                              try {
+                                const variantAttrs = JSON.parse(item.variant)
+                                if (Array.isArray(variantAttrs) && variantAttrs.length > 0) {
+                                  return (
+                                    <div className="space-y-0.5 mt-1">
+                                      {variantAttrs.map((attr: any, idx: number) => (
+                                        <div key={idx} className="text-xs">
+                                          <span className="text-muted-foreground">{attr.name}:</span>{" "}
+                                          <span className="font-medium text-foreground">{attr.value}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )
+                                }
+                              } catch (e) {
+                                // Fallback for old format (plain string)
+                                return (
+                                  <div className="text-xs text-muted-foreground mt-0.5">
+                                    {item.variant}
+                                  </div>
+                                )
+                              }
+                              return null
+                            })()}
+                            <div className="text-xs text-muted-foreground mt-1">
                               {formatCurrencyCompact(item.price)} × {item.quantity}
                             </div>
                           </div>
@@ -906,7 +1045,7 @@ export function POSInterface() {
                               variant="outline"
                               size="icon"
                               className="h-8 w-8"
-                              onClick={() => updateQuantity(item.productId, item.quantity - 1)}
+                              onClick={() => updateQuantity(item.productId, item.quantity - 1, item.variant)}
                             >
                               <IconMinus className="h-3.5 w-3.5" />
                             </Button>
@@ -917,7 +1056,7 @@ export function POSInterface() {
                               variant="outline"
                               size="icon"
                               className="h-8 w-8"
-                              onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                              onClick={() => updateQuantity(item.productId, item.quantity + 1, item.variant)}
                             >
                               <IconPlus className="h-3.5 w-3.5" />
                             </Button>
@@ -925,7 +1064,7 @@ export function POSInterface() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                              onClick={() => removeFromCart(item.productId)}
+                              onClick={() => removeFromCart(item.productId, item.variant)}
                             >
                               <IconTrash className="h-3.5 w-3.5" />
                             </Button>
@@ -1110,6 +1249,82 @@ export function POSInterface() {
           onUpdate={handleUpdateCart}
         />
       )}
+
+      {/* Variant Selection Dialog */}
+      <Dialog open={showVariantDialog} onOpenChange={setShowVariantDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Select Variant</DialogTitle>
+            <DialogDescription>
+              {productForVariant?.name} has multiple variants. Please select one or add with base price.
+            </DialogDescription>
+          </DialogHeader>
+          {productForVariant && productForVariant.variants && (
+            <div className="space-y-4">
+              <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                {productForVariant.variants.map((variant, index) => {
+                  const variantPrice = variant.price || productForVariant.price
+                  const variantStock = variant.stock ?? 0
+                  const variantAttrsString = variant.attributes?.map(attr => `${attr.name}: ${attr.value}`).join(", ") || ""
+                  return (
+                    <div
+                      key={index}
+                      className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                        selectedVariantIndex === index
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                      onClick={() => setSelectedVariantIndex(index)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          {variant.attributes && variant.attributes.length > 0 ? (
+                            <div className="space-y-1">
+                              {variant.attributes.map((attr, attrIndex) => (
+                                <div key={attrIndex} className="text-sm">
+                                  <span className="font-medium text-muted-foreground">{attr.name}:</span>{" "}
+                                  <span className="font-semibold">{attr.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="font-medium text-sm">
+                              Variant {index + 1}
+                            </div>
+                          )}
+                          <div className="text-xs text-muted-foreground mt-2">
+                            Stock: {variantStock} • {formatCurrency(variantPrice)}
+                          </div>
+                        </div>
+                        {selectedVariantIndex === index && (
+                          <IconCheck className="h-5 w-5 text-primary ml-2 flex-shrink-0" />
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              
+              <div className="flex flex-col gap-2 pt-2 border-t">
+                <Button
+                  onClick={handleVariantSelection}
+                  disabled={selectedVariantIndex === null}
+                  className="w-full"
+                >
+                  Add Selected Variant
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleAddWithoutVariant}
+                  className="w-full"
+                >
+                  Add with Base Price ({formatCurrency(productForVariant.price)})
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

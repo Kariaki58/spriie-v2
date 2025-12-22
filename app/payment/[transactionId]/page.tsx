@@ -29,7 +29,12 @@ export default function PaymentPage() {
   const [processing, setProcessing] = React.useState(false)
 
   React.useEffect(() => {
-    if (transactionId) {
+    const loadTransaction = async () => {
+      if (!transactionId) {
+        setLoading(false)
+        return
+      }
+
       // First, check if it's a test transaction
       const testTransactions = getTestTransactions()
       const testTransaction = testTransactions.find(t => t.id === transactionId)
@@ -45,12 +50,44 @@ export default function PaymentPage() {
       if (stored) {
         setTransaction(stored)
         setLoading(false)
-      } else {
-        // If not found, show error
+        return
+      }
+      
+      // If not found locally, try to fetch from API
+      try {
+        const res = await fetch(`/api/pos/transactions/${transactionId}`)
+        const data = await res.json()
+        
+        if (data.success && data.data) {
+          // Map API response to POSTransaction format
+          const apiTransaction = data.data
+          const mappedTransaction: POSTransaction = {
+            id: apiTransaction._id || apiTransaction.id,
+            transactionNumber: apiTransaction.transactionNumber,
+            items: apiTransaction.items || [],
+            subtotal: apiTransaction.subtotal,
+            tax: apiTransaction.tax,
+            total: apiTransaction.total,
+            paymentMethod: apiTransaction.paymentMethod,
+            paymentStatus: apiTransaction.paymentStatus,
+            qrCode: apiTransaction.qrCode,
+            createdAt: apiTransaction.createdAt,
+            paidAt: apiTransaction.paidAt,
+          }
+          setTransaction(mappedTransaction)
+          setLoading(false)
+        } else {
+          setLoading(false)
+          toast.error("Transaction not found. Please scan the QR code again.")
+        }
+      } catch (error) {
+        console.error("Error fetching transaction:", error)
         setLoading(false)
         toast.error("Transaction not found. Please scan the QR code again.")
       }
     }
+
+    loadTransaction()
   }, [transactionId])
 
   const handleCompletePayment = async () => {
@@ -65,19 +102,48 @@ export default function PaymentPage() {
       // Simulate payment processing
       await new Promise((resolve) => setTimeout(resolve, 1500))
       
-      // Update transaction status
-      const paidAt = new Date().toISOString()
-      updateTransactionStatus(transaction.id, "paid", paidAt)
+      // Update transaction status in API
+      try {
+        const res = await fetch(`/api/pos/transactions/${transaction.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paymentStatus: "paid" }),
+        })
+        
+        const data = await res.json()
+        if (data.success && data.data) {
+          // Update local state with API response
+          const apiTransaction = data.data
+          const paidAt = apiTransaction.paidAt || new Date().toISOString()
+          setTransaction({
+            ...transaction,
+            paymentStatus: "paid",
+            paidAt,
+          })
+        } else {
+          // Fallback to localStorage update if API fails
+          const paidAt = new Date().toISOString()
+          updateTransactionStatus(transaction.id, "paid", paidAt)
+          setTransaction({
+            ...transaction,
+            paymentStatus: "paid",
+            paidAt,
+          })
+        }
+      } catch (apiError) {
+        // Fallback to localStorage update if API call fails
+        console.error("API update failed, using localStorage:", apiError)
+        const paidAt = new Date().toISOString()
+        updateTransactionStatus(transaction.id, "paid", paidAt)
+        setTransaction({
+          ...transaction,
+          paymentStatus: "paid",
+          paidAt,
+        })
+      }
       
       // Trigger storage event for cross-tab sync
       window.dispatchEvent(new Event("storage"))
-      
-      // Update local state
-      setTransaction({
-        ...transaction,
-        paymentStatus: "paid",
-        paidAt,
-      })
       
       toast.success("Payment completed successfully!")
       
@@ -86,6 +152,7 @@ export default function PaymentPage() {
         router.push("/dashboard/pos")
       }, 2000)
     } catch (error) {
+      console.error("Payment error:", error)
       toast.error("Payment failed. Please try again.")
       setProcessing(false)
     }
