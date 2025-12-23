@@ -16,6 +16,7 @@ import {
   IconArrowUp,
   IconArrowDown,
   IconCheck,
+  IconDownload,
 } from "@tabler/icons-react"
 import { QRCodeSVG } from "qrcode.react"
 import { toast } from "sonner"
@@ -57,6 +58,7 @@ import {
 import { formatCurrency, formatCurrencyCompact } from "@/lib/utils"
 import { getAppBaseUrl } from "@/lib/app-url"
 import { CartModificationDialog } from "./cart-modification-dialog"
+import { downloadInvoice } from "@/lib/invoice-generator"
 
 interface Product {
   _id: string
@@ -212,6 +214,25 @@ export function POSInterface() {
   React.useEffect(() => {
     loadTransactions()
   }, [loadTransactions])
+
+  // Poll for transaction updates every 3 seconds to detect real-time payments
+  React.useEffect(() => {
+    // Only poll if there are pending transactions
+    const hasPending = transactions.some(t => t.paymentStatus === "pending")
+    
+    if (!hasPending) {
+      return // Don't poll if no pending transactions
+    }
+
+    const interval = setInterval(() => {
+      if (!isLoadingTransactions) {
+        loadTransactions()
+      }
+    }, 3000) // Poll every 3 seconds
+
+    return () => clearInterval(interval)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions.length, isLoadingTransactions]) // Poll when transaction count changes or loading state changes
 
   const addToCart = (product: Product, variantIndex: number | null = null) => {
     let finalPrice = product.price
@@ -622,6 +643,43 @@ export function POSInterface() {
                             ? "✗ Cancelled"
                             : "⏳ Pending"}
                         </Badge>
+                        {/* Download Invoice Button - Available for all transactions */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            try {
+                              // Fetch transaction details if needed
+                              const res = await fetch(`/api/pos/transactions/${transaction._id}`)
+                              const data = await res.json()
+                              
+                              if (data.success && data.data) {
+                                const tx = data.data
+                                downloadInvoice({
+                                  transactionNumber: tx.transactionNumber,
+                                  items: tx.items || [],
+                                  subtotal: tx.subtotal,
+                                  tax: tx.tax,
+                                  total: tx.total,
+                                  paymentMethod: tx.paymentMethod,
+                                  paymentStatus: tx.paymentStatus,
+                                  createdAt: tx.createdAt,
+                                  paidAt: tx.paidAt,
+                                }, `invoice-${tx.transactionNumber}.pdf`)
+                                toast.success("Invoice downloaded")
+                              } else {
+                                toast.error("Failed to fetch transaction details")
+                              }
+                            } catch (error) {
+                              console.error("Error downloading invoice:", error)
+                              toast.error("Failed to download invoice")
+                            }
+                          }}
+                          className="h-8 px-2"
+                          title="Download invoice"
+                        >
+                          <IconDownload className="h-3.5 w-3.5" />
+                        </Button>
                         {transaction.paymentStatus === "pending" && (
                           <>
                             {transaction.qrCode && (

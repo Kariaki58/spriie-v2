@@ -19,6 +19,8 @@ import { formatCurrency } from "@/lib/utils"
 import { getTransactionById, updateTransactionStatus, storeTransaction } from "@/lib/transaction-storage"
 import { type POSTransaction } from "@/lib/pos-data"
 import { getTestTransactions } from "@/lib/test-transactions"
+import { downloadInvoice } from "@/lib/invoice-generator"
+import { IconDownload } from "@tabler/icons-react"
 
 export default function PaymentPage() {
   const params = useParams()
@@ -96,67 +98,98 @@ export default function PaymentPage() {
       return
     }
 
+    if (transaction.paymentMethod !== "transfer") {
+      toast.error("This transaction can only be paid via transfer")
+      return
+    }
+
     setProcessing(true)
     
     try {
-      // Simulate payment processing
-      await new Promise((resolve) => setTimeout(resolve, 1500))
-      
-      // Update transaction status in API
-      try {
-        const res = await fetch(`/api/pos/transactions/${transaction.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ paymentStatus: "paid" }),
-        })
-        
-        const data = await res.json()
-        if (data.success && data.data) {
-          // Update local state with API response
-          const apiTransaction = data.data
-          const paidAt = apiTransaction.paidAt || new Date().toISOString()
-          setTransaction({
-            ...transaction,
-            paymentStatus: "paid",
-            paidAt,
-          })
-        } else {
-          // Fallback to localStorage update if API fails
-          const paidAt = new Date().toISOString()
-          updateTransactionStatus(transaction.id, "paid", paidAt)
-          setTransaction({
-            ...transaction,
-            paymentStatus: "paid",
-            paidAt,
-          })
-        }
-      } catch (apiError) {
-        // Fallback to localStorage update if API call fails
-        console.error("API update failed, using localStorage:", apiError)
-        const paidAt = new Date().toISOString()
-        updateTransactionStatus(transaction.id, "paid", paidAt)
-        setTransaction({
-          ...transaction,
-          paymentStatus: "paid",
-          paidAt,
-        })
+      // Initialize Flutterwave payment
+      const initRes = await fetch("/api/pos/payment/initialize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          transactionId: transaction.id,
+          email: "customer@example.com",
+          name: "POS Customer",
+        }),
+      })
+
+      const initData = await initRes.json()
+
+      if (!initData.success || !initData.data.paymentLink) {
+        toast.error(initData.error || "Failed to initialize payment")
+        setProcessing(false)
+        return
       }
-      
-      // Trigger storage event for cross-tab sync
-      window.dispatchEvent(new Event("storage"))
-      
-      toast.success("Payment completed successfully!")
-      
-      // Redirect after a short delay
-      setTimeout(() => {
-        router.push("/dashboard/pos")
-      }, 2000)
+
+      // Redirect to Flutterwave payment page
+      window.location.href = initData.data.paymentLink
     } catch (error) {
       console.error("Payment error:", error)
       toast.error("Payment failed. Please try again.")
       setProcessing(false)
     }
   }
+
+  // Check for payment status in URL params after Flutterwave redirect
+  React.useEffect(() => {
+    if (!transaction) return
+
+    const params = new URLSearchParams(window.location.search)
+    const paymentStatus = params.get("payment")
+    const message = params.get("message")
+    
+    if (paymentStatus === "success") {
+      // Reload transaction to get latest status
+      const reloadTransaction = () => {
+        fetch(`/api/pos/transactions/${transaction.id}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.success && data.data) {
+              const apiTransaction = data.data
+              const mappedTransaction: POSTransaction = {
+                id: apiTransaction._id || apiTransaction.id,
+                transactionNumber: apiTransaction.transactionNumber,
+                items: apiTransaction.items || [],
+                subtotal: apiTransaction.subtotal,
+                tax: apiTransaction.tax,
+                total: apiTransaction.total,
+                paymentMethod: apiTransaction.paymentMethod,
+                paymentStatus: apiTransaction.paymentStatus,
+                qrCode: apiTransaction.qrCode,
+                createdAt: apiTransaction.createdAt,
+                paidAt: apiTransaction.paidAt,
+              }
+              setTransaction(mappedTransaction)
+              
+              if (mappedTransaction.paymentStatus === "paid") {
+                toast.success("Payment completed successfully! ✅")
+              } else {
+                // Payment callback processed but webhook might be pending
+                toast.info("Processing payment confirmation...")
+              }
+              
+              // Clean up URL
+              window.history.replaceState({}, "", `/payment/${transaction.id}`)
+            }
+          })
+          .catch(err => {
+            console.error("Error reloading transaction:", err)
+          })
+      }
+      
+      // Reload immediately and then once more after a short delay
+      reloadTransaction()
+      setTimeout(reloadTransaction, 2000)
+    } else if (paymentStatus === "failed" || paymentStatus === "error") {
+      toast.error(message || "Payment failed. Please try again.")
+      // Clean up URL
+      window.history.replaceState({}, "", `/payment/${transaction.id}`)
+    }
+  }, [transaction])
 
   if (loading) {
     return (
@@ -301,7 +334,7 @@ export default function PaymentPage() {
           </div>
 
           {/* Payment Button */}
-          {!isPaid && (
+          {!isPaid && transaction.paymentMethod === "transfer" && (
             <div className="pt-4">
               <Button
                 onClick={handleCompletePayment}
@@ -312,26 +345,67 @@ export default function PaymentPage() {
                 {processing ? (
                   <>
                     <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                    Processing Payment...
+                    Redirecting to Payment...
                   </>
                 ) : (
-                  "Complete Payment"
+                  "Pay Now with Flutterwave"
                 )}
               </Button>
               <p className="text-xs text-center text-muted-foreground mt-2">
-                Click to confirm payment completion
+                You will be redirected to Flutterwave to complete your payment securely
               </p>
             </div>
           )}
 
-          {isPaid && (
+          {!isPaid && transaction.paymentMethod === "cash" && (
             <div className="pt-4">
+              <div className="flex items-center justify-center gap-2 p-4 rounded-lg bg-blue-500/10 border border-blue-200 dark:border-blue-800">
+                <IconReceipt className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                <span className="font-medium text-blue-700 dark:text-blue-300">
+                  Cash payment - Please pay at the counter
+                </span>
+              </div>
+            </div>
+          )}
+
+          {isPaid && (
+            <div className="pt-4 space-y-3">
               <div className="flex items-center justify-center gap-2 p-4 rounded-lg bg-emerald-500/10 border border-emerald-200 dark:border-emerald-800">
                 <IconCheck className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
                 <span className="font-medium text-emerald-700 dark:text-emerald-300">
-                  Payment completed successfully!
+                  Payment completed successfully! ✅
                 </span>
               </div>
+              {transaction.paidAt && (
+                <div className="text-center text-sm text-muted-foreground">
+                  Paid on {new Date(transaction.paidAt).toLocaleString()}
+                </div>
+              )}
+              <Button
+                onClick={() => {
+                  try {
+                    downloadInvoice({
+                      transactionNumber: transaction.transactionNumber,
+                      items: transaction.items,
+                      subtotal: transaction.subtotal,
+                      tax: transaction.tax,
+                      total: transaction.total,
+                      paymentMethod: transaction.paymentMethod,
+                      paymentStatus: transaction.paymentStatus,
+                      createdAt: transaction.createdAt,
+                      paidAt: transaction.paidAt,
+                    }, `invoice-${transaction.transactionNumber}.pdf`)
+                  } catch (error) {
+                    console.error("Error downloading invoice:", error)
+                    toast.error("Failed to generate invoice. Please try again.")
+                  }
+                }}
+                variant="outline"
+                className="w-full"
+              >
+                <IconDownload className="h-4 w-4 mr-2" />
+                Download Invoice
+              </Button>
             </div>
           )}
         </CardContent>

@@ -50,6 +50,9 @@ const POSTransactionSchema = new Schema(
     paidAt: {
       type: Date,
     },
+    paymentReference: {
+      type: String,
+    },
     user: {
       type: Schema.Types.ObjectId,
       ref: "User",
