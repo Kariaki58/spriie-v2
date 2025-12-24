@@ -6,8 +6,13 @@ const OrderItemSchema = new Schema({
     ref: "Product",
     required: true,
   },
-  productName: String,
-  variantId: String,
+  productName: {
+    type: String,
+    required: true,
+  },
+  variant: {
+    type: String, // JSON string of variant attributes [{name: "Size", value: "L"}]
+  },
   quantity: {
     type: Number,
     required: true,
@@ -48,6 +53,39 @@ const OrderSchema = new Schema(
       type: String,
       enum: ["pending", "processing", "shipped", "delivered", "cancelled"],
       default: "pending",
+    },
+    paymentStatus: {
+      type: String,
+      enum: ["pending", "paid", "failed", "refunded"],
+      default: "pending",
+    },
+    paymentMethod: {
+      type: String,
+      enum: ["flutterwave", "cash", "transfer"],
+      default: "flutterwave",
+    },
+    paymentReference: {
+      type: String,
+    },
+    flutterwaveReference: {
+      type: String,
+    },
+    trackingId: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    subtotal: {
+      type: Number,
+      required: true,
+    },
+    shipping: {
+      type: Number,
+      default: 0,
+    },
+    tax: {
+      type: Number,
+      default: 0,
     },
     total: {
       type: Number,
