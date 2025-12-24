@@ -10,10 +10,6 @@ export function formatCurrency(amount: number): string {
 }
 
 export function formatCurrencyCompact(amount: number): string {
-  if (amount >= 1000000) {
-    return `₦${(amount / 1000000).toFixed(1)}M`
-  } else if (amount >= 1000) {
-    return `₦${(amount / 1000).toFixed(1)}K`
-  }
-  return `₦${Math.round(amount).toLocaleString()}`
+  // Show full number with commas instead of compact format (K, M)
+  return `₦${amount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
 }

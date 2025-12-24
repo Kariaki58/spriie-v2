@@ -294,22 +294,49 @@ export function PaymentContent() {
           <div className="space-y-3">
             <h3 className="font-semibold text-lg">Items</h3>
             <div className="space-y-2">
-              {transaction.items.map((item, index) => (
-                <div
-                  key={`${item.productId}-${index}`}
-                  className="flex justify-between items-center p-3 rounded-lg border bg-muted/30"
-                >
-                  <div className="flex-1">
-                    <div className="font-medium">{item.productName}</div>
-                    <div className="text-sm text-muted-foreground">
-                      {formatCurrency(item.price)} × {item.quantity}
+              {transaction.items.map((item, index) => {
+                // Parse variant information if available
+                let variantDisplay: string | null = null
+                if (item.variant) {
+                  try {
+                    const variantAttrs = JSON.parse(item.variant)
+                    if (Array.isArray(variantAttrs) && variantAttrs.length > 0) {
+                      variantDisplay = variantAttrs.map((attr: any) => `${attr.name}: ${attr.value}`).join(", ")
+                    } else {
+                      variantDisplay = item.variant
+                    }
+                  } catch {
+                    // If not JSON, use as string (fallback)
+                    variantDisplay = item.variant
+                  }
+                }
+                
+                return (
+                  <div
+                    key={`${item.productId}-${index}`}
+                    className="flex justify-between items-start p-3 rounded-lg border bg-muted/30"
+                  >
+                    <div className="flex-1">
+                      <div className="font-medium">{item.productName}</div>
+                      {variantDisplay && (
+                        <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+                          {variantDisplay.split(", ").map((variantPart, idx) => (
+                            <div key={idx} className="text-muted-foreground">
+                              {variantPart}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="text-sm text-muted-foreground mt-1">
+                        {formatCurrency(item.price)} × {item.quantity}
+                      </div>
+                    </div>
+                    <div className="font-semibold text-primary ml-4">
+                      {formatCurrency(item.price * item.quantity)}
                     </div>
                   </div>
-                  <div className="font-semibold text-primary">
-                    {formatCurrency(item.price * item.quantity)}
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
 

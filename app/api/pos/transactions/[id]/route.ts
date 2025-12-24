@@ -52,9 +52,9 @@ export async function PATCH(
     if (session?.user) {
       // Authenticated requests: find by ID and user
       transaction = await POSTransaction.findOne({
-        _id: id,
-        user: (session as any).userId,
-      })
+      _id: id,
+      user: (session as any).userId,
+    })
     } else {
       // Unauthenticated requests: find by ID only (for customer payment completion)
       transaction = await POSTransaction.findOne({

@@ -17,6 +17,10 @@ import {
   IconArrowDown,
   IconCheck,
   IconDownload,
+  IconTrendingUp,
+  IconReceipt,
+  IconClock,
+  IconCurrencyNaira,
 } from "@tabler/icons-react"
 import { QRCodeSVG } from "qrcode.react"
 import { toast } from "sonner"
@@ -83,6 +87,7 @@ interface Transaction {
     productName: string
     price: number
     quantity: number
+    variant?: string
   }>
   subtotal: number
   tax: number
@@ -141,7 +146,10 @@ export function POSInterface() {
   // Variant selection state
   const [showVariantDialog, setShowVariantDialog] = React.useState(false)
   const [productForVariant, setProductForVariant] = React.useState<Product | null>(null)
-  const [selectedVariantIndex, setSelectedVariantIndex] = React.useState<number | null>(null)
+  const [selectedVariantIndices, setSelectedVariantIndices] = React.useState<number[]>([])
+  
+  // Checkout submission state to prevent duplicates
+  const [isSubmittingCheckout, setIsSubmittingCheckout] = React.useState(false)
 
   // Load products
   const loadProducts = React.useCallback(async () => {
@@ -257,7 +265,7 @@ export function POSInterface() {
       } else {
         // Multiple variants but none selected - show selection dialog
         setProductForVariant(product)
-        setSelectedVariantIndex(null)
+        setSelectedVariantIndices([])
         setShowVariantDialog(true)
         return
       }
@@ -293,13 +301,21 @@ export function POSInterface() {
     toast.success(`${displayName} added to cart`)
   }
   
-  const handleVariantSelection = () => {
-    if (productForVariant && selectedVariantIndex !== null) {
-      addToCart(productForVariant, selectedVariantIndex)
-      setShowVariantDialog(false)
-      setProductForVariant(null)
-      setSelectedVariantIndex(null)
-    }
+  const handleVariantClick = (index: number) => {
+    if (!productForVariant) return
+    
+    // Add variant directly to cart when clicked
+    addToCart(productForVariant, index)
+    
+    // Track that this variant was added (for UI feedback)
+    setSelectedVariantIndices((prev) => {
+      if (prev.includes(index)) {
+        // If already added, don't add again (already in cart)
+        return prev
+      } else {
+        return [...prev, index]
+      }
+    })
   }
   
   const handleAddWithoutVariant = () => {
@@ -331,7 +347,7 @@ export function POSInterface() {
       toast.success(`${productForVariant.name} added to cart`)
       setShowVariantDialog(false)
       setProductForVariant(null)
-      setSelectedVariantIndex(null)
+      setSelectedVariantIndices([])
     }
   }
 
@@ -372,6 +388,13 @@ export function POSInterface() {
       toast.error("Cart is empty")
       return
     }
+    
+    // Prevent duplicate submissions
+    if (isSubmittingCheckout) {
+      return
+    }
+    
+    setIsSubmittingCheckout(true)
 
     try {
       const baseUrl = getAppBaseUrl()
@@ -435,6 +458,8 @@ export function POSInterface() {
     } catch (error: any) {
       console.error("Checkout error:", error)
       toast.error("Failed to process checkout")
+    } finally {
+      setIsSubmittingCheckout(false)
     }
   }
 
@@ -518,8 +543,190 @@ export function POSInterface() {
     )
   }
 
+  // Calculate summary metrics
+  const today = React.useMemo(() => {
+    const todayStart = new Date()
+    todayStart.setHours(0, 0, 0, 0)
+    return todayStart
+  }, [])
+
+  const todayTransactions = React.useMemo(() => {
+    return transactions.filter((t) => {
+      const transactionDate = new Date(t.createdAt)
+      return transactionDate >= today
+    })
+  }, [transactions, today])
+
+  const metrics = React.useMemo(() => {
+    const totalRevenueToday = todayTransactions
+      .filter((t) => t.paymentStatus === "paid")
+      .reduce((sum, t) => sum + t.total, 0)
+
+    const totalTransactionsToday = todayTransactions.length
+
+    const pendingTransactions = transactions.filter((t) => t.paymentStatus === "pending").length
+
+    const paidTransactionsToday = todayTransactions.filter((t) => t.paymentStatus === "paid").length
+
+    return {
+      totalRevenueToday,
+      totalTransactionsToday,
+      pendingTransactions,
+      paidTransactionsToday,
+    }
+  }, [todayTransactions, transactions])
+
   return (
     <div className="flex flex-col min-h-screen lg:h-screen gap-4 p-2 sm:p-4 pb-4">
+      {/* Summary Cards */}
+      <div className="w-full">
+        {/* Mobile: Horizontal scroll carousel */}
+        <div className="flex sm:hidden gap-4 overflow-x-auto pb-2 -mx-2 sm:mx-0 px-2 sm:px-0 scrollbar-hide">
+          <Card className="border flex-shrink-0 w-[280px]">
+            <CardHeader className="pb-3">
+              <CardDescription className="text-sm font-medium text-muted-foreground">
+                Today's Revenue
+              </CardDescription>
+              <CardTitle className="text-2xl font-bold flex items-center gap-2">
+                <IconCurrencyNaira className="h-5 w-5 text-primary" />
+                {formatCurrency(metrics.totalRevenueToday)}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <IconTrendingUp className="h-3.5 w-3.5 text-emerald-600" />
+                <span>{metrics.paidTransactionsToday} paid transaction{metrics.paidTransactionsToday !== 1 ? 's' : ''} today</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border flex-shrink-0 w-[280px]">
+            <CardHeader className="pb-3">
+              <CardDescription className="text-sm font-medium text-muted-foreground">
+                Transactions Today
+              </CardDescription>
+              <CardTitle className="text-2xl font-bold flex items-center gap-2">
+                <IconReceipt className="h-5 w-5 text-primary" />
+                {metrics.totalTransactionsToday}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>Total transactions created today</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border flex-shrink-0 w-[280px]">
+            <CardHeader className="pb-3">
+              <CardDescription className="text-sm font-medium text-muted-foreground">
+                Pending Payments
+              </CardDescription>
+              <CardTitle className="text-2xl font-bold flex items-center gap-2">
+                <IconClock className="h-5 w-5 text-yellow-600" />
+                {metrics.pendingTransactions}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>Awaiting payment confirmation</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border flex-shrink-0 w-[280px]">
+            <CardHeader className="pb-3">
+              <CardDescription className="text-sm font-medium text-muted-foreground">
+                Paid Today
+              </CardDescription>
+              <CardTitle className="text-2xl font-bold flex items-center gap-2">
+                <IconCheck className="h-5 w-5 text-emerald-600" />
+                {metrics.paidTransactionsToday}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <IconTrendingUp className="h-3.5 w-3.5 text-emerald-600" />
+                <span>Completed payments today</span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Desktop: Grid layout */}
+        <div className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card className="border">
+            <CardHeader className="pb-3">
+              <CardDescription className="text-sm font-medium text-muted-foreground">
+                Today's Revenue
+              </CardDescription>
+              <CardTitle className="text-2xl font-bold flex items-center gap-2">
+                <IconCurrencyNaira className="h-5 w-5 text-primary" />
+                {formatCurrency(metrics.totalRevenueToday)}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <IconTrendingUp className="h-3.5 w-3.5 text-emerald-600" />
+                <span>{metrics.paidTransactionsToday} paid transaction{metrics.paidTransactionsToday !== 1 ? 's' : ''} today</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border">
+            <CardHeader className="pb-3">
+              <CardDescription className="text-sm font-medium text-muted-foreground">
+                Transactions Today
+              </CardDescription>
+              <CardTitle className="text-2xl font-bold flex items-center gap-2">
+                <IconReceipt className="h-5 w-5 text-primary" />
+                {metrics.totalTransactionsToday}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>Total transactions created today</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border">
+            <CardHeader className="pb-3">
+              <CardDescription className="text-sm font-medium text-muted-foreground">
+                Pending Payments
+              </CardDescription>
+              <CardTitle className="text-2xl font-bold flex items-center gap-2">
+                <IconClock className="h-5 w-5 text-yellow-600" />
+                {metrics.pendingTransactions}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>Awaiting payment confirmation</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border">
+            <CardHeader className="pb-3">
+              <CardDescription className="text-sm font-medium text-muted-foreground">
+                Paid Today
+              </CardDescription>
+              <CardTitle className="text-2xl font-bold flex items-center gap-2">
+                <IconCheck className="h-5 w-5 text-emerald-600" />
+                {metrics.paidTransactionsToday}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <IconTrendingUp className="h-3.5 w-3.5 text-emerald-600" />
+                <span>Completed payments today</span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
       {/* Transactions Section */}
       <div className="h-96 flex-shrink-0 border rounded-lg bg-card overflow-hidden">
         <Card className="border-0 shadow-none h-full flex flex-col">
@@ -612,14 +819,32 @@ export function POSInterface() {
                   {transactions.map((transaction) => (
                     <div
                       key={transaction._id}
-                      className="flex items-center justify-between rounded-lg border bg-muted/30 p-3 hover:bg-muted/50 transition-colors"
+                      className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border bg-muted/30 p-3 hover:bg-muted/50 transition-colors"
                     >
                       <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-sm mb-1">
-                          {transaction.transactionNumber}
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <div className="font-semibold text-sm">
+                            {transaction.transactionNumber}
+                          </div>
+                          {/* Badge on mobile - top right */}
+                          <Badge
+                            className={`sm:hidden ${
+                              transaction.paymentStatus === "paid"
+                                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                                : transaction.paymentStatus === "cancelled"
+                                ? "bg-red-500/10 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800"
+                                : "bg-yellow-500/10 text-yellow-700 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800"
+                            }`}
+                          >
+                            {transaction.paymentStatus === "paid"
+                              ? "✓ Paid"
+                              : transaction.paymentStatus === "cancelled"
+                              ? "✗ Cancelled"
+                              : "⏳ Pending"}
+                          </Badge>
                         </div>
                         <div className="text-xs text-muted-foreground space-y-0.5">
-                          <div>
+                          <div className="break-words">
                             {transaction.items.length} item{transaction.items.length !== 1 ? "s" : ""} • {formatCurrency(transaction.total)} • {transaction.paymentMethod === "cash" ? "💵 Cash" : "📱 Transfer"}
                           </div>
                           <div className="text-xs">
@@ -627,15 +852,17 @@ export function POSInterface() {
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+                      {/* Actions section - stacked on mobile, horizontal on desktop */}
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:ml-4 flex-shrink-0">
+                        {/* Badge on desktop - hidden on mobile */}
                         <Badge
-                          className={
+                          className={`hidden sm:inline-flex ${
                             transaction.paymentStatus === "paid"
                               ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
                               : transaction.paymentStatus === "cancelled"
                               ? "bg-red-500/10 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800"
                               : "bg-yellow-500/10 text-yellow-700 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800"
-                          }
+                          }`}
                         >
                           {transaction.paymentStatus === "paid"
                             ? "✓ Paid"
@@ -643,82 +870,87 @@ export function POSInterface() {
                             ? "✗ Cancelled"
                             : "⏳ Pending"}
                         </Badge>
-                        {/* Download Invoice Button - Available for all transactions */}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={async () => {
-                            try {
-                              // Fetch transaction details if needed
-                              const res = await fetch(`/api/pos/transactions/${transaction._id}`)
-                              const data = await res.json()
-                              
-                              if (data.success && data.data) {
-                                const tx = data.data
-                                downloadInvoice({
-                                  transactionNumber: tx.transactionNumber,
-                                  items: tx.items || [],
-                                  subtotal: tx.subtotal,
-                                  tax: tx.tax,
-                                  total: tx.total,
-                                  paymentMethod: tx.paymentMethod,
-                                  paymentStatus: tx.paymentStatus,
-                                  createdAt: tx.createdAt,
-                                  paidAt: tx.paidAt,
-                                }, `invoice-${tx.transactionNumber}.pdf`)
-                                toast.success("Invoice downloaded")
-                              } else {
-                                toast.error("Failed to fetch transaction details")
+                        
+                        {/* Action buttons row */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {/* Download Invoice Button - Available for all transactions */}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              try {
+                                // Fetch transaction details if needed
+                                const res = await fetch(`/api/pos/transactions/${transaction._id}`)
+                                const data = await res.json()
+                                
+                                if (data.success && data.data) {
+                                  const tx = data.data
+                                  downloadInvoice({
+                                    transactionNumber: tx.transactionNumber,
+                                    items: tx.items || [],
+                                    subtotal: tx.subtotal,
+                                    tax: tx.tax,
+                                    total: tx.total,
+                                    paymentMethod: tx.paymentMethod,
+                                    paymentStatus: tx.paymentStatus,
+                                    createdAt: tx.createdAt,
+                                    paidAt: tx.paidAt,
+                                  }, `invoice-${tx.transactionNumber}.pdf`)
+                                  toast.success("Invoice downloaded")
+                                } else {
+                                  toast.error("Failed to fetch transaction details")
+                                }
+                              } catch (error) {
+                                console.error("Error downloading invoice:", error)
+                                toast.error("Failed to download invoice")
                               }
-                            } catch (error) {
-                              console.error("Error downloading invoice:", error)
-                              toast.error("Failed to download invoice")
-                            }
-                          }}
-                          className="h-8 px-2"
-                          title="Download invoice"
-                        >
-                          <IconDownload className="h-3.5 w-3.5" />
-                        </Button>
-                        {transaction.paymentStatus === "pending" && (
-                          <>
-                            {transaction.qrCode && (
+                            }}
+                            className="h-8 px-2 sm:px-2"
+                            title="Download invoice"
+                          >
+                            <IconDownload className="h-3.5 w-3.5" />
+                          </Button>
+                          {transaction.paymentStatus === "pending" && (
+                            <>
+                              {transaction.qrCode && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setCurrentTransaction(transaction)
+                                    setShowQRCode(true)
+                                  }}
+                                  className="h-8 px-2"
+                                  title="View QR code"
+                                >
+                                  <IconQrcode className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
+                              {(transaction.paymentStatus === "pending" || transaction.paymentStatus === "failed") && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedTransactionForCart(transaction)
+                                    setShowCartDialog(true)
+                                  }}
+                                  className="h-8 px-2"
+                                  title="Update cart items"
+                                >
+                                  <IconShoppingCart className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
                               <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => {
-                                  setCurrentTransaction(transaction)
-                                  setShowQRCode(true)
-                                }}
-                                className="h-8 px-2"
+                                onClick={() => handleMarkAsPaid(transaction._id)}
+                                className="h-8 text-xs px-3"
                               >
-                                <IconQrcode className="h-3.5 w-3.5" />
+                                Mark Paid
                               </Button>
-                            )}
-                            {(transaction.paymentStatus === "pending" || transaction.paymentStatus === "failed") && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  setSelectedTransactionForCart(transaction)
-                                  setShowCartDialog(true)
-                                }}
-                                className="h-8 px-2"
-                                title="Update cart items"
-                              >
-                                <IconShoppingCart className="h-3.5 w-3.5" />
-                              </Button>
-                            )}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleMarkAsPaid(transaction._id)}
-                              className="h-8 text-xs"
-                            >
-                              Mark Paid
-                            </Button>
-                          </>
-                        )}
+                            </>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -1167,10 +1399,15 @@ export function POSInterface() {
 
                     <Button
                       onClick={handleCheckout}
+                      disabled={isSubmittingCheckout}
                       className="w-full h-12 text-base font-semibold"
                       size="lg"
                     >
-                      {paymentMethod === "cash" ? "Complete Payment" : "Generate QR Code"}
+                      {isSubmittingCheckout 
+                        ? "Processing..." 
+                        : paymentMethod === "cash" 
+                          ? "Complete Payment" 
+                          : "Generate QR Code"}
                     </Button>
                   </div>
                 )}
@@ -1182,95 +1419,126 @@ export function POSInterface() {
 
       {/* QR Code Dialog */}
       <Dialog open={showQRCode} onOpenChange={setShowQRCode}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
+        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col p-0">
+          <DialogHeader className="px-6 pt-6 pb-4 flex-shrink-0">
             <DialogTitle>Scan to Pay</DialogTitle>
             <DialogDescription>
               Customer should scan this QR code with their phone to view invoice and complete payment
             </DialogDescription>
           </DialogHeader>
           {currentTransaction && (
-            <div className="space-y-4">
-              <div className="flex justify-center p-4 bg-muted rounded-lg">
-                <div className="bg-white p-4 rounded-lg flex flex-col items-center">
-                  {currentTransaction.qrCode && (
-                    <>
-                      <QRCodeSVG
-                        value={currentTransaction.qrCode}
-                        size={200}
-                        level="H"
-                        includeMargin={true}
-                      />
-                      <div className="text-xs text-center mt-2 text-muted-foreground font-mono">
-                        {currentTransaction.transactionNumber}
-                      </div>
-                      <div className="text-[10px] text-center mt-1 text-muted-foreground break-all max-w-[200px] px-2">
-                        {currentTransaction.qrCode}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <Card className="border-2 border-dashed">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm">Invoice Preview</CardTitle>
-                  <CardDescription className="text-xs">
-                    What customer will see after scanning
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm">
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Transaction #</span>
-                      <span className="font-mono">{currentTransaction.transactionNumber}</span>
-                    </div>
-                    <Separator />
-                    <div className="space-y-1">
-                      {currentTransaction.items.map((item, idx) => (
-                        <div key={idx} className="flex justify-between text-xs">
-                          <span className="flex-1 truncate">
-                            {item.productName} × {item.quantity}
-                          </span>
-                          <span className="ml-2">{formatCurrency(item.price * item.quantity)}</span>
+            <div className="flex flex-col flex-1 min-h-0 px-6 pb-6">
+              {/* Scrollable content */}
+              <div className="flex-1 overflow-y-auto space-y-4 pr-2 -mr-2">
+                <div className="flex justify-center p-3 sm:p-4 bg-muted rounded-lg">
+                  <div className="bg-white p-3 sm:p-4 rounded-lg flex flex-col items-center">
+                    {currentTransaction.qrCode && (
+                      <>
+                        <QRCodeSVG
+                          value={currentTransaction.qrCode}
+                          size={160}
+                          level="H"
+                          includeMargin={true}
+                        />
+                        <div className="text-xs text-center mt-2 text-muted-foreground font-mono">
+                          {currentTransaction.transactionNumber}
                         </div>
-                      ))}
-                    </div>
-                    <Separator />
-                    <div className="space-y-1 text-xs">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Subtotal</span>
-                        <span>{formatCurrency(currentTransaction.subtotal)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">VAT (7.5%)</span>
-                        <span>{formatCurrency(currentTransaction.tax)}</span>
+                        <div className="text-[10px] text-center mt-1 text-muted-foreground break-all max-w-[200px] px-2">
+                          {currentTransaction.qrCode}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <Card className="border-2 border-dashed">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm">Invoice Preview</CardTitle>
+                    <CardDescription className="text-xs">
+                      What customer will see after scanning
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-sm">
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>Transaction #</span>
+                        <span className="font-mono">{currentTransaction.transactionNumber}</span>
                       </div>
                       <Separator />
-                      <div className="flex justify-between font-bold text-base">
-                        <span>Total</span>
-                        <span>{formatCurrency(currentTransaction.total)}</span>
+                      <div className="space-y-1 max-h-[120px] overflow-y-auto">
+                        {currentTransaction.items.map((item, idx) => {
+                          // Parse variant information if available
+                          let variantDisplay: string | null = null
+                          if (item.variant) {
+                            try {
+                              const variantAttrs = JSON.parse(item.variant)
+                              if (Array.isArray(variantAttrs) && variantAttrs.length > 0) {
+                                variantDisplay = variantAttrs.map((attr: any) => `${attr.name}: ${attr.value}`).join(", ")
+                              } else {
+                                variantDisplay = item.variant
+                              }
+                            } catch {
+                              variantDisplay = item.variant
+                            }
+                          }
+                          
+                          return (
+                            <div key={idx} className="flex flex-col gap-0.5 text-xs">
+                              <div className="flex justify-between items-start">
+                                <div className="flex-1 min-w-0">
+                                  <div className="truncate font-medium">{item.productName}</div>
+                                  {variantDisplay && (
+                                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                                      {variantDisplay}
+                                    </div>
+                                  )}
+                                  <div className="text-[10px] text-muted-foreground">
+                                    Qty: {item.quantity}
+                                  </div>
+                                </div>
+                                <span className="ml-2 font-semibold whitespace-nowrap">{formatCurrency(item.price * item.quantity)}</span>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <Separator />
+                      <div className="space-y-1 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Subtotal</span>
+                          <span>{formatCurrency(currentTransaction.subtotal)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">VAT (7.5%)</span>
+                          <span>{formatCurrency(currentTransaction.tax)}</span>
+                        </div>
+                        <Separator />
+                        <div className="flex justify-between font-bold text-base">
+                          <span>Total</span>
+                          <span>{formatCurrency(currentTransaction.total)}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
 
-              {currentTransaction.paymentStatus === "pending" && (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => {
-                    setSelectedTransactionForCart(currentTransaction)
-                    setShowCartDialog(true)
-                  }}
-                >
-                  <IconShoppingCart className="h-4 w-4 mr-2" />
-                  Update Cart Items
-                </Button>
-              )}
+                {currentTransaction.paymentStatus === "pending" && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      setSelectedTransactionForCart(currentTransaction)
+                      setShowCartDialog(true)
+                    }}
+                  >
+                    <IconShoppingCart className="h-4 w-4 mr-2" />
+                    Update Cart Items
+                  </Button>
+                )}
+              </div>
 
-              <div className="flex gap-2">
+              {/* Sticky footer buttons */}
+              <div className="flex gap-2 pt-4 mt-4 border-t flex-shrink-0">
                 <Button
                   variant="outline"
                   className="flex-1"
@@ -1312,9 +1580,9 @@ export function POSInterface() {
       <Dialog open={showVariantDialog} onOpenChange={setShowVariantDialog}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Select Variant</DialogTitle>
+            <DialogTitle>Select Variants</DialogTitle>
             <DialogDescription>
-              {productForVariant?.name} has multiple variants. Please select one or add with base price.
+              {productForVariant?.name} has multiple variants. Click on variants to add them directly to cart. Each variant will be added as a separate item.
             </DialogDescription>
           </DialogHeader>
           {productForVariant && productForVariant.variants && (
@@ -1323,16 +1591,16 @@ export function POSInterface() {
                 {productForVariant.variants.map((variant, index) => {
                   const variantPrice = variant.price || productForVariant.price
                   const variantStock = variant.stock ?? 0
-                  const variantAttrsString = variant.attributes?.map(attr => `${attr.name}: ${attr.value}`).join(", ") || ""
+                  const isSelected = selectedVariantIndices.includes(index)
                   return (
                     <div
                       key={index}
                       className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                        selectedVariantIndex === index
+                        isSelected
                           ? "border-primary bg-primary/5"
                           : "border-border hover:border-primary/50"
                       }`}
-                      onClick={() => setSelectedVariantIndex(index)}
+                      onClick={() => handleVariantClick(index)}
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
@@ -1354,7 +1622,7 @@ export function POSInterface() {
                             Stock: {variantStock} • {formatCurrency(variantPrice)}
                           </div>
                         </div>
-                        {selectedVariantIndex === index && (
+                        {isSelected && (
                           <IconCheck className="h-5 w-5 text-primary ml-2 flex-shrink-0" />
                         )}
                       </div>
@@ -1364,12 +1632,19 @@ export function POSInterface() {
               </div>
               
               <div className="flex flex-col gap-2 pt-2 border-t">
+                <div className="text-xs text-muted-foreground text-center">
+                  Click on variants to add them directly to cart. Each variant will be added as a separate item.
+                </div>
                 <Button
-                  onClick={handleVariantSelection}
-                  disabled={selectedVariantIndex === null}
+                  variant="outline"
+                  onClick={() => {
+                    setShowVariantDialog(false)
+                    setProductForVariant(null)
+                    setSelectedVariantIndices([])
+                  }}
                   className="w-full"
                 >
-                  Add Selected Variant
+                  Done
                 </Button>
                 <Button
                   variant="outline"
