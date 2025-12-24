@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth"
 import dbConnect from "@/lib/db"
 import Order from "@/lib/models/order"
 import Product from "@/lib/models/product"
-import { authOptions } from "@/app/api/auth/[...nextauth]/route"
+import { authOptions } from "@/lib/auth"
 
 // Generate unique order number
 function generateOrderNumber(): string {

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import dbConnect from "@/lib/db"
 import Order from "@/lib/models/order"
-import { authOptions } from "@/app/api/auth/[...nextauth]/route"
+import { authOptions } from "@/lib/auth"
+
 
 export async function GET(
   req: NextRequest,
