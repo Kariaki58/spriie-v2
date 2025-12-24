@@ -220,29 +220,116 @@ Get order details by ID, orderNumber, or trackingId.
     "status": "processing",
     "paymentStatus": "paid",
     "paymentMethod": "flutterwave",
-    "items": [
-      {
-        "product": {
-          "_id": "product_id",
-          "name": "Product Name",
-          "image": "https://...",
-          "description": "...",
-          "category": "Electronics"
-        },
-        "productName": "Product Name",
-        "variant": "[{\"name\":\"Size\",\"value\":\"L\"}]",
-        "quantity": 2,
-        "price": 5500,
-        "total": 11000
-      }
-    ],
+    "items": [...],
     "subtotal": 11000,
     "shipping": 1000,
     "tax": 375,
     "total": 12375,
+    "shippingDate": "2024-01-15T00:00:00.000Z",
+    "shippingProvider": "DHL",
     "createdAt": "2024-01-01T00:00:00.000Z",
     "updatedAt": "2024-01-01T00:00:00.000Z"
   }
+}
+```
+
+### Track Order (Public)
+
+**GET** `/api/orders/track/[trackingId]`
+
+Public endpoint to track order by tracking ID or order number. No authentication required.
+
+**Note:** The `trackingId` parameter can be either the actual tracking ID (e.g., `TRKKD4YIEVEEL`) or the order number (e.g., `ORD-1766569896706-1024`).
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "orderNumber": "ORD-1234567890-1234",
+    "trackingId": "TRKABC12345",
+    "status": "processing",
+    "paymentStatus": "paid",
+    "items": [...],
+    "subtotal": 11000,
+    "shipping": 1000,
+    "tax": 375,
+    "total": 12375,
+    "shippingAddress": "123 Main St, Lagos, Nigeria",
+    "shippingDate": "2024-01-15T00:00:00.000Z",
+    "shippingProvider": "DHL",
+    "deliveryNote": "Delivered to customer at front door",
+    "customerName": "John Doe",
+    "createdAt": "2024-01-01T00:00:00.000Z",
+    "updatedAt": "2024-01-01T00:00:00.000Z"
+  }
+}
+```
+
+### Update Order (Admin)
+
+**PATCH** `/api/orders/[id]`
+
+Update order details. Requires authentication.
+
+**Request Body:**
+```json
+{
+  "status": "delivered",
+  "deliveryNote": "Delivered to customer at front door, signed by recipient"
+}
+```
+
+**Validation Rules:**
+- When `status` is set to `"processing"`, `shippingDate` is **required**
+- When `status` is set to `"shipped"`, `shippingProvider` is **required**
+- When `status` is set to `"delivered"`, `deliveryNote` is **required**
+
+**Allowed Fields:**
+- `status`: Order status
+- `paymentStatus`: Payment status
+- `paymentReference`: Payment reference
+- `flutterwaveReference`: Flutterwave reference
+- `shippingAddress`: Shipping address
+- `shippingDate`: Shipping date (required when status = "processing")
+- `shippingProvider`: Shipping provider/logistic company (required when status = "shipped")
+- `deliveryNote`: Delivery note/details (required when status = "delivered")
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "order_id",
+    "orderNumber": "ORD-1234567890-1234",
+    "status": "processing",
+    "shippingDate": "2024-01-15T00:00:00.000Z",
+    ...
+  },
+  "message": "Order updated successfully"
+}
+```
+
+**Error Response (400):**
+```json
+{
+  "error": "Shipping date is required when status is set to processing"
+}
+```
+
+or
+
+```json
+{
+  "error": "Shipping provider is required when status is set to shipped"
+}
+```
+
+or
+
+```json
+{
+  "error": "Delivery note is required when status is set to delivered"
 }
 ```
 
@@ -407,10 +494,47 @@ Products can have variants with different attributes (e.g., Size, Color). When c
 
 6. **Track Order:**
    ```
-   GET /api/orders/[trackingId]
+   GET /api/orders/track/[trackingId]
    ```
    
-   Use tracking ID returned in step 2
+   Use tracking ID returned in step 2 (public endpoint, no auth required)
+
+### Admin Order Management Flow
+
+1. **View All Orders:**
+   ```
+   GET /api/orders?status=processing&paymentStatus=paid
+   ```
+
+2. **Update Order to Processing:**
+   ```
+   PATCH /api/orders/[order_id]
+   Body: {
+     "status": "processing",
+     "shippingDate": "2024-01-15"
+   }
+   ```
+   **Note:** `shippingDate` is required when setting status to "processing"
+
+3. **Update Order to Shipped:**
+   ```
+   PATCH /api/orders/[order_id]
+   Body: {
+     "status": "shipped",
+     "shippingProvider": "DHL"
+   }
+   ```
+   **Note:** `shippingProvider` is required when setting status to "shipped"
+
+4. **Update Order to Delivered:**
+   ```
+   PATCH /api/orders/[order_id]
+   Body: {
+     "status": "delivered",
+     "deliveryNote": "Delivered to customer at front door, signed by recipient"
+   }
+   ```
+   **Note:** `deliveryNote` is required when setting status to "delivered"
 
 ---
 

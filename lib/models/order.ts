@@ -96,6 +96,15 @@ const OrderSchema = new Schema(
       type: String,
       required: true,
     },
+    shippingDate: {
+      type: Date,
+    },
+    shippingProvider: {
+      type: String,
+    },
+    deliveryNote: {
+      type: String,
+    },
   },
   {
     timestamps: true,

@@ -7,12 +7,12 @@ import { authOptions } from "@/lib/auth"
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await dbConnect()
 
-    const { id } = params
+    const { id } = await params
     if (!id) {
       return NextResponse.json(
         { error: "Order ID is required" },
@@ -49,7 +49,7 @@ export async function GET(
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -62,7 +62,7 @@ export async function PATCH(
 
     await dbConnect()
 
-    const { id } = params
+    const { id } = await params
     const body = await req.json()
 
     // Find order
@@ -74,6 +74,33 @@ export async function PATCH(
       )
     }
 
+    // Validate status transitions
+    if (body.status) {
+      // If updating to "processing", require shippingDate
+      if (body.status === "processing" && !body.shippingDate) {
+        return NextResponse.json(
+          { error: "Shipping date is required when status is set to processing" },
+          { status: 400 }
+        )
+      }
+
+      // If updating to "shipped", require shippingProvider
+      if (body.status === "shipped" && !body.shippingProvider) {
+        return NextResponse.json(
+          { error: "Shipping provider is required when status is set to shipped" },
+          { status: 400 }
+        )
+      }
+
+      // If updating to "delivered", require deliveryNote
+      if (body.status === "delivered" && !body.deliveryNote) {
+        return NextResponse.json(
+          { error: "Delivery note is required when status is set to delivered" },
+          { status: 400 }
+        )
+      }
+    }
+
     // Update allowed fields
     const allowedUpdates = [
       "status",
@@ -81,6 +108,9 @@ export async function PATCH(
       "paymentReference",
       "flutterwaveReference",
       "shippingAddress",
+      "shippingDate",
+      "shippingProvider",
+      "deliveryNote",
     ]
 
     const updates: any = {}
