@@ -1,7 +1,7 @@
 "use client"
 
 import { IconTrendingDown, IconTrendingUp, IconLoader2 } from "@tabler/icons-react"
-import { useMemo, useEffect, useState } from "react"
+import { useMemo, useEffect, useState, useCallback } from "react"
 import { Badge } from "@/components/ui/badge"
 import {
   Card,
@@ -12,7 +12,6 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { cn, formatCurrency } from "@/lib/utils"
-import { useActiveUsers } from "@/components/active-users"
 
 interface Order {
   _id: string
@@ -41,7 +40,27 @@ export function DashboardMetrics() {
     activeOnlineUsers: number
   } | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const { count: realtimeActiveUsers, isConnected: isRealtimeConnected } = useActiveUsers()
+
+  // Function to fetch visitor stats
+  const fetchVisitorStats = useCallback(async () => {
+    try {
+      const visitorsRes = await fetch("/api/visitors/stats?days=7")
+      if (!visitorsRes.ok) {
+        console.error("Visitor stats API error:", visitorsRes.status, visitorsRes.statusText)
+        // Don't fail if visitor stats fail, just don't show them
+      } else {
+        const visitorsData = await visitorsRes.json()
+        if (visitorsData.success) {
+          setVisitorStats(visitorsData.data)
+        } else {
+          console.error("Visitor stats API returned error:", visitorsData.error)
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching visitor stats:", error)
+      // Don't fail if visitor stats fail, just don't show them
+    }
+  }, [])
 
   useEffect(() => {
     async function fetchData() {
@@ -62,16 +81,7 @@ export function DashboardMetrics() {
         }
 
         // Fetch visitor stats (last 7 days)
-        try {
-          const visitorsRes = await fetch("/api/visitors/stats?days=7")
-          const visitorsData = await visitorsRes.json()
-          if (visitorsData.success) {
-            setVisitorStats(visitorsData.data)
-          }
-        } catch (error) {
-          console.error("Error fetching visitor stats:", error)
-          // Don't fail if visitor stats fail, just don't show them
-        }
+        await fetchVisitorStats()
       } catch (error) {
         console.error("Error fetching dashboard data:", error)
       } finally {
@@ -80,7 +90,14 @@ export function DashboardMetrics() {
     }
 
     fetchData()
-  }, [])
+
+    // Poll visitor stats every 10 seconds to keep it updated
+    const interval = setInterval(() => {
+      fetchVisitorStats()
+    }, 60000) // Poll every 10 seconds
+
+    return () => clearInterval(interval)
+  }, [fetchVisitorStats])
 
   const metrics = useMemo(() => {
     // Combine orders and POS transactions
@@ -217,46 +234,42 @@ export function DashboardMetrics() {
     },
     {
       id: 4,
-      title: isLoading
-        ? <IconLoader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        : realtimeActiveUsers !== null && isRealtimeConnected
-          ? `${realtimeActiveUsers}`
-          : visitorStats
-            ? (visitorStats.totalUniqueVisitors ?? 0).toLocaleString()
-            : "0",
+      title: isLoading ? (
+        <IconLoader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      ) : visitorStats ? (
+        (visitorStats.totalUniqueVisitors ?? 0).toLocaleString()
+      ) : (
+        "0"
+      ),
       description: "Website Visitors",
       badge: {
-        icon:
-          !visitorStats || visitorStats.growth >= 0
-            ? IconTrendingUp
-            : IconTrendingDown,
-        text: isLoading
-          ? "--"
-          : visitorStats
+        icon: !visitorStats || visitorStats.growth >= 0 
+          ? IconTrendingUp 
+          : IconTrendingDown,
+        text: isLoading 
+          ? "--" 
+          : visitorStats 
             ? `${visitorStats.growth >= 0 ? "+" : ""}${visitorStats.growth.toFixed(1)}%`
-            : "--",
+            : "0%",
         variant: "outline" as const,
       },
-      footerTitle:
-        !visitorStats || visitorStats.growth === 0
-          ? "No change"
-          : visitorStats.growth >= 0
-            ? "Traffic increasing"
+      footerTitle: !visitorStats 
+        ? "No data available" 
+        : visitorStats.growth === 0 
+          ? "Stable traffic" 
+          : visitorStats.growth > 0 
+            ? "Traffic increasing" 
             : "Traffic decreasing",
-      footerDescription: realtimeActiveUsers !== null && isRealtimeConnected
-        ? `${realtimeActiveUsers} active online now • ${visitorStats?.totalUniqueVisitors ?? 0} total (7 days)`
-        : visitorStats
-          ? `${visitorStats.activeOnlineUsers ?? 0} active online • Last 7 days`
-          : "0 active online • Last 7 days",
-      icon:
-        !visitorStats || visitorStats.growth >= 0
-          ? IconTrendingUp
-          : IconTrendingDown,
-      trend:
-        !visitorStats || visitorStats.growth >= 0
-          ? ("up" as const)
-          : ("down" as const),
-    },
+      footerDescription: visitorStats
+        ? `${visitorStats.activeOnlineUsers ?? 0} active now • Last days`
+        : "0 active now • Last 7 days",
+      icon: !visitorStats || visitorStats.growth >= 0 
+        ? IconTrendingUp 
+        : IconTrendingDown,
+      trend: !visitorStats || visitorStats.growth >= 0 
+        ? ("up" as const) 
+        : ("down" as const),
+    }
   ]
 
   return (
