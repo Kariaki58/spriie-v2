@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import dbConnect from "@/lib/db"
 import Order from "@/lib/models/order"
+import { updateProductSoldCount } from "@/lib/product-updates"
 
 export async function GET(req: NextRequest) {
   try {
@@ -55,11 +56,28 @@ export async function GET(req: NextRequest) {
             verifyData.data.status === "successful" &&
             verifyData.data.amount === order.total
           ) {
-            // Update order
-            order.paymentStatus = "paid"
-            order.flutterwaveReference = tx_ref
-            order.status = "processing"
-            await order.save()
+            // Only update if not already paid (to prevent double-counting)
+            if (order.paymentStatus !== "paid") {
+              // Update order
+              order.paymentStatus = "paid"
+              order.flutterwaveReference = tx_ref
+              order.status = "processing"
+              await order.save()
+
+              // Update product sold counts and stock
+              try {
+                const itemsToUpdate = order.items.map((item: any) => ({
+                  productId: item.product,
+                  quantity: item.quantity,
+                  variant: item.variant,
+                  price: item.price,
+                }))
+                await updateProductSoldCount(itemsToUpdate)
+              } catch (error) {
+                console.error("Error updating product sold counts:", error)
+                // Don't fail the callback if product update fails
+              }
+            }
 
             return NextResponse.redirect(
               new URL(

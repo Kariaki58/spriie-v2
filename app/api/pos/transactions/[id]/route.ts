@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import dbConnect from "@/lib/db"
 import POSTransaction from "@/lib/models/pos-transaction"
+import { updateProductSoldCount } from "@/lib/product-updates"
 
 export async function GET(
   req: NextRequest,
@@ -96,9 +97,26 @@ export async function PATCH(
           )
         }
 
-        transaction.paymentStatus = "paid"
-        transaction.paidAt = new Date()
-        await transaction.save()
+        // Only update if not already paid (to prevent double-counting)
+        if (transaction.paymentStatus !== "paid") {
+          transaction.paymentStatus = "paid"
+          transaction.paidAt = new Date()
+          await transaction.save()
+
+          // Update product sold counts and stock
+          try {
+            const itemsToUpdate = transaction.items.map((item: any) => ({
+              productId: item.productId,
+              quantity: item.quantity,
+              variant: item.variant,
+              price: item.price,
+            }))
+            await updateProductSoldCount(itemsToUpdate)
+          } catch (error) {
+            console.error("Error updating product sold counts:", error)
+            // Don't fail the update if product update fails
+          }
+        }
 
         return NextResponse.json({ success: true, data: transaction })
       }
@@ -144,13 +162,32 @@ export async function PATCH(
 
     // Update payment status if provided
     if (paymentStatus) {
+      const wasPending = transaction.paymentStatus === "pending"
       transaction.paymentStatus = paymentStatus
       if (paymentStatus === "paid") {
         transaction.paidAt = new Date()
       }
-    }
+      
+      await transaction.save()
 
-    await transaction.save()
+      // If status changed from pending to paid, update product stock
+      if (wasPending && paymentStatus === "paid") {
+        try {
+          const itemsToUpdate = transaction.items.map((item: any) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            variant: item.variant,
+            price: item.price,
+          }))
+          await updateProductSoldCount(itemsToUpdate)
+        } catch (error) {
+          console.error("Error updating product sold counts:", error)
+          // Don't fail the update if product update fails
+        }
+      }
+    } else {
+      await transaction.save()
+    }
 
     return NextResponse.json({ success: true, data: transaction })
   } catch (error: any) {

@@ -146,7 +146,15 @@ export function POSInterface() {
   // Variant selection state
   const [showVariantDialog, setShowVariantDialog] = React.useState(false)
   const [productForVariant, setProductForVariant] = React.useState<Product | null>(null)
-  const [selectedVariantIndices, setSelectedVariantIndices] = React.useState<number[]>([])
+  // Track variant indices with their quantities: { variantIndex: quantity }
+  const [selectedVariantQuantities, setSelectedVariantQuantities] = React.useState<Record<number, number>>({})
+
+  // Reset selected variants when dialog closes
+  React.useEffect(() => {
+    if (!showVariantDialog) {
+      setSelectedVariantQuantities({})
+    }
+  }, [showVariantDialog])
   
   // Checkout submission state to prevent duplicates
   const [isSubmittingCheckout, setIsSubmittingCheckout] = React.useState(false)
@@ -245,36 +253,53 @@ export function POSInterface() {
   const addToCart = (product: Product, variantIndex: number | null = null) => {
     let finalPrice = product.price
     let variantString: string | undefined = undefined
+    let availableStock: number | null = null
     
     if (product.variants && product.variants.length > 0) {
       if (variantIndex !== null && variantIndex >= 0 && variantIndex < product.variants.length) {
-        // Use selected variant
+        // Use selected variant - price is base price + variant price
         const variant = product.variants[variantIndex]
-        finalPrice = variant.price || product.price
+        finalPrice = product.price + (variant.price || 0)
+        availableStock = variant.stock ?? 0
         // Store variant attributes as JSON string for proper storage
         variantString = variant.attributes 
           ? JSON.stringify(variant.attributes.map(attr => ({ name: attr.name, value: attr.value })))
           : undefined
       } else if (product.variants.length === 1) {
-        // Auto-select if only one variant
+        // Auto-select if only one variant - price is base price + variant price
         const variant = product.variants[0]
-        finalPrice = variant.price || product.price
+        finalPrice = product.price + (variant.price || 0)
+        availableStock = variant.stock ?? 0
         variantString = variant.attributes 
           ? JSON.stringify(variant.attributes.map(attr => ({ name: attr.name, value: attr.value })))
           : undefined
       } else {
         // Multiple variants but none selected - show selection dialog
         setProductForVariant(product)
-        setSelectedVariantIndices([])
+        setSelectedVariantQuantities({})
         setShowVariantDialog(true)
         return
       }
+    } else {
+      // No variants, use product stock
+      availableStock = product.stock ?? 0
     }
     
     // Find existing item with same productId and variant (or both undefined)
     const existingItem = cart.find((item) => 
       item.productId === product._id && item.variant === variantString
     )
+    
+    // Calculate current quantity in cart
+    const currentQuantityInCart = existingItem ? existingItem.quantity : 0
+    const newQuantity = currentQuantityInCart + 1
+    
+    // Check stock availability
+    if (availableStock !== null && newQuantity > availableStock) {
+      const variantInfo = variantString ? ` for selected variant` : ""
+      toast.error(`Insufficient stock${variantInfo}. Available: ${availableStock}, Requested: ${newQuantity}`)
+      return
+    }
     
     if (existingItem) {
       setCart(
@@ -302,20 +327,126 @@ export function POSInterface() {
   }
   
   const handleVariantClick = (index: number) => {
-    if (!productForVariant) return
+    if (!productForVariant || !productForVariant.variants) return
     
-    // Add variant directly to cart when clicked
-    addToCart(productForVariant, index)
+    const variant = productForVariant.variants[index]
+    const availableStock = variant.stock ?? 0
+    const currentQty = selectedVariantQuantities[index] || 0
     
-    // Track that this variant was added (for UI feedback)
-    setSelectedVariantIndices((prev) => {
-      if (prev.includes(index)) {
-        // If already added, don't add again (already in cart)
-        return prev
+    // Check if adding one more would exceed stock
+    if (currentQty >= availableStock) {
+      toast.error(`Cannot add more. Available stock: ${availableStock}`)
+      return
+    }
+    
+    // Increment quantity for this variant each time it's clicked
+    setSelectedVariantQuantities((prev) => {
+      const qty = prev[index] || 0
+      const newQty = qty + 1
+      return { ...prev, [index]: newQty }
+    })
+  }
+
+  const handleRemoveVariantQuantity = (index: number, e: React.MouseEvent) => {
+    e.stopPropagation() // Prevent triggering the click handler
+    setSelectedVariantQuantities((prev) => {
+      const currentQty = prev[index] || 0
+      if (currentQty <= 1) {
+        // Remove from selection if quantity is 1 or less
+        const newQuantities = { ...prev }
+        delete newQuantities[index]
+        return newQuantities
       } else {
-        return [...prev, index]
+        // Decrement quantity
+        return { ...prev, [index]: currentQty - 1 }
       }
     })
+  }
+
+  const handleAddSelectedVariants = () => {
+    if (!productForVariant || !productForVariant.variants || Object.keys(selectedVariantQuantities).length === 0) {
+      setShowVariantDialog(false)
+      setProductForVariant(null)
+      setSelectedVariantQuantities({})
+      return
+    }
+
+    // Validate stock before adding
+    for (const [indexStr, quantity] of Object.entries(selectedVariantQuantities)) {
+      const index = parseInt(indexStr, 10)
+      const variant = productForVariant.variants[index]
+      
+      if (!variant) continue
+      
+      const availableStock = variant.stock ?? 0
+      
+      // Check if quantity exceeds available stock
+      if (quantity > availableStock) {
+        const variantName = variant.attributes?.map(attr => `${attr.name}: ${attr.value}`).join(", ") || `Variant ${index + 1}`
+        toast.error(`Insufficient stock for ${variantName}. Available: ${availableStock}, Selected: ${quantity}`)
+        return
+      }
+      
+      // Check current cart quantity for this variant
+      const variantString = variant.attributes 
+        ? JSON.stringify(variant.attributes.map(attr => ({ name: attr.name, value: attr.value })))
+        : undefined
+      
+      const existingCartItems = cart.filter((item) => 
+        item.productId === productForVariant._id && item.variant === variantString
+      )
+      const currentCartQuantity = existingCartItems.reduce((sum, item) => sum + item.quantity, 0)
+      
+      if (currentCartQuantity + quantity > availableStock) {
+        const variantName = variant.attributes?.map(attr => `${attr.name}: ${attr.value}`).join(", ") || `Variant ${index + 1}`
+        toast.error(`Insufficient stock for ${variantName}. Available: ${availableStock}, Already in cart: ${currentCartQuantity}, Trying to add: ${quantity}`)
+        return
+      }
+    }
+
+    // Add all selected variants to cart - each quantity becomes a separate cart item
+    const newCartItems: Array<{
+      productId: string
+      productName: string
+      price: number
+      quantity: number
+      variant?: string
+    }> = []
+
+    Object.entries(selectedVariantQuantities).forEach(([indexStr, quantity]) => {
+      const index = parseInt(indexStr, 10)
+      const variant = productForVariant.variants![index]
+      
+      if (!variant) return
+
+      // Calculate final price: base price + variant price
+      const finalPrice = productForVariant.price + (variant.price || 0)
+      
+      // Create variant string
+      const variantString = variant.attributes 
+        ? JSON.stringify(variant.attributes.map(attr => ({ name: attr.name, value: attr.value })))
+        : undefined
+
+      // Add this variant quantity times as separate items
+      for (let i = 0; i < quantity; i++) {
+        newCartItems.push({
+          productId: productForVariant._id,
+          productName: productForVariant.name,
+          price: finalPrice,
+          quantity: 1,
+          variant: variantString,
+        })
+      }
+    })
+
+    // Add all new items to cart (they will be separate items)
+    setCart([...cart, ...newCartItems])
+
+    const totalItems = Object.values(selectedVariantQuantities).reduce((sum, qty) => sum + qty, 0)
+    toast.success(`${totalItems} variant item(s) added to cart`)
+    setShowVariantDialog(false)
+    setProductForVariant(null)
+    setSelectedVariantQuantities({})
   }
   
   const handleAddWithoutVariant = () => {
@@ -347,7 +478,7 @@ export function POSInterface() {
       toast.success(`${productForVariant.name} added to cart`)
       setShowVariantDialog(false)
       setProductForVariant(null)
-      setSelectedVariantIndices([])
+      setSelectedVariantQuantities({})
     }
   }
 
@@ -363,6 +494,49 @@ export function POSInterface() {
       removeFromCart(productId, variant)
       return
     }
+
+    // Find the product to check stock
+    const product = products.find(p => p._id === productId)
+    if (!product) {
+      toast.error("Product not found")
+      return
+    }
+
+    // Check stock availability
+    let availableStock: number | null = null
+
+    if (variant) {
+      // Parse variant to find matching variant stock
+      try {
+        const variantAttrs = JSON.parse(variant)
+        if (product.variants && product.variants.length > 0) {
+          const matchingVariant = product.variants.find((v: any) => {
+            if (!v.attributes || !Array.isArray(v.attributes)) return false
+            return variantAttrs.every((attr: any) => 
+              v.attributes.some((vAttr: any) => 
+                vAttr.name === attr.name && vAttr.value === attr.value
+              )
+            )
+          })
+          if (matchingVariant) {
+            availableStock = matchingVariant.stock ?? 0
+          }
+        }
+      } catch (e) {
+        console.error("Error parsing variant:", e)
+      }
+    } else {
+      // No variant, use product stock
+      availableStock = product.stock ?? 0
+    }
+
+    // Check if quantity exceeds available stock
+    if (availableStock !== null && quantity > availableStock) {
+      const variantInfo = variant ? " for selected variant" : ""
+      toast.error(`Insufficient stock${variantInfo}. Available: ${availableStock}, Requested: ${quantity}`)
+      return
+    }
+
     setCart(
       cart.map((item) =>
         item.productId === productId && item.variant === variant
@@ -450,8 +624,9 @@ export function POSInterface() {
           setPaymentMethod("cash")
         }
         
-        // Reload transactions
+        // Reload transactions and products to reflect updated stock
         loadTransactions()
+        loadProducts()
       } else {
         toast.error(data.error || "Failed to create transaction")
       }
@@ -475,6 +650,7 @@ export function POSInterface() {
       if (data.success) {
         toast.success("Payment marked as paid")
         loadTransactions()
+        loadProducts() // Reload products to show updated stock
         if (currentTransaction?._id === transactionId) {
           setShowQRCode(false)
           setCurrentTransaction(null)
@@ -1179,7 +1355,9 @@ export function POSInterface() {
                                     onClick={() => {
                                       const firstCartItem = cart.find(item => item.productId === product._id)
                                       if (firstCartItem) {
-                                        updateQuantity(product._id, firstCartItem.quantity + 1, firstCartItem.variant)
+                                        // Check stock before incrementing
+                                        const newQuantity = firstCartItem.quantity + 1
+                                        updateQuantity(product._id, newQuantity, firstCartItem.variant)
                                       } else {
                                         // If not in cart, try to add (will show variant dialog if needed)
                                         addToCart(product)
@@ -1346,7 +1524,10 @@ export function POSInterface() {
                               variant="outline"
                               size="icon"
                               className="h-8 w-8"
-                              onClick={() => updateQuantity(item.productId, item.quantity + 1, item.variant)}
+                              onClick={() => {
+                                const newQuantity = item.quantity + 1
+                                updateQuantity(item.productId, newQuantity, item.variant)
+                              }}
                             >
                               <IconPlus className="h-3.5 w-3.5" />
                             </Button>
@@ -1589,9 +1770,11 @@ export function POSInterface() {
             <div className="space-y-4">
               <div className="space-y-2 max-h-[300px] overflow-y-auto">
                 {productForVariant.variants.map((variant, index) => {
-                  const variantPrice = variant.price || productForVariant.price
+                  // Variant price is base price + variant price increment
+                  const variantPrice = productForVariant.price + (variant.price || 0)
                   const variantStock = variant.stock ?? 0
-                  const isSelected = selectedVariantIndices.includes(index)
+                  const quantity = selectedVariantQuantities[index] || 0
+                  const isSelected = quantity > 0
                   return (
                     <div
                       key={index}
@@ -1600,7 +1783,13 @@ export function POSInterface() {
                           ? "border-primary bg-primary/5"
                           : "border-border hover:border-primary/50"
                       }`}
-                      onClick={() => handleVariantClick(index)}
+                      onClick={() => {
+                        // Only allow clicking if not at max stock
+                        if (quantity < variantStock) {
+                          handleVariantClick(index)
+                        }
+                      }}
+                      style={{ cursor: quantity >= variantStock ? "not-allowed" : "pointer" }}
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
@@ -1620,11 +1809,47 @@ export function POSInterface() {
                           )}
                           <div className="text-xs text-muted-foreground mt-2">
                             Stock: {variantStock} • {formatCurrency(variantPrice)}
+                            {quantity > 0 && (
+                              <span className="ml-2 text-primary font-medium">
+                                ({quantity} selected)
+                              </span>
+                            )}
+                            {quantity >= variantStock && (
+                              <span className="ml-2 text-red-600 dark:text-red-400 font-medium">
+                                (Max reached)
+                              </span>
+                            )}
                           </div>
                         </div>
-                        {isSelected && (
-                          <IconCheck className="h-5 w-5 text-primary ml-2 flex-shrink-0" />
-                        )}
+                        <div className="flex items-center gap-2 ml-2">
+                          {isSelected && (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-6 w-6"
+                                onClick={(e) => handleRemoveVariantQuantity(index, e)}
+                              >
+                                <IconMinus className="h-3 w-3" />
+                              </Button>
+                              <span className="font-semibold text-primary min-w-[20px] text-center">
+                                {quantity}
+                              </span>
+                            </>
+                          )}
+                          <Button
+                            variant={isSelected ? "default" : "outline"}
+                            size="icon"
+                            className="h-6 w-6"
+                            disabled={quantity >= variantStock}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleVariantClick(index)
+                            }}
+                          >
+                            <IconPlus className="h-3 w-3" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   )
@@ -1633,22 +1858,24 @@ export function POSInterface() {
               
               <div className="flex flex-col gap-2 pt-2 border-t">
                 <div className="text-xs text-muted-foreground text-center">
-                  Click on variants to add them directly to cart. Each variant will be added as a separate item.
+                  Select variants by clicking on them. Click Done to add selected variants to cart.
                 </div>
                 <Button
-                  variant="outline"
-                  onClick={() => {
-                    setShowVariantDialog(false)
-                    setProductForVariant(null)
-                    setSelectedVariantIndices([])
-                  }}
+                  onClick={handleAddSelectedVariants}
                   className="w-full"
+                  disabled={Object.keys(selectedVariantQuantities).length === 0}
                 >
-                  Done
+                  Done {(() => {
+                    const totalItems = Object.values(selectedVariantQuantities).reduce((sum, qty) => sum + qty, 0)
+                    return totalItems > 0 ? `(${totalItems} item${totalItems > 1 ? 's' : ''})` : ''
+                  })()}
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={handleAddWithoutVariant}
+                  onClick={() => {
+                    handleAddWithoutVariant()
+                    setSelectedVariantQuantities({})
+                  }}
                   className="w-full"
                 >
                   Add with Base Price ({formatCurrency(productForVariant.price)})

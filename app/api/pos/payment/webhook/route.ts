@@ -4,6 +4,7 @@ import dbConnect from "@/lib/db"
 import POSTransaction from "@/lib/models/pos-transaction"
 import Wallet from "@/lib/models/wallet"
 import Transaction from "@/lib/models/transaction"
+import { updateProductSoldCount } from "@/lib/product-updates"
 
 export async function POST(req: NextRequest) {
   try {
@@ -115,6 +116,20 @@ async function handleSuccessfulPOSPayment(data: any) {
       wallet.available += amount
       wallet.ledger += amount
       await wallet.save()
+
+      // Update product sold counts and stock
+      try {
+        const itemsToUpdate = posTransaction.items.map((item: any) => ({
+          productId: item.productId,
+          quantity: item.quantity,
+          variant: item.variant,
+          price: item.price,
+        }))
+        await updateProductSoldCount(itemsToUpdate)
+      } catch (error) {
+        console.error("Error updating product sold counts:", error)
+        // Don't fail the webhook if product update fails
+      }
 
       console.log(`POS Payment successful: Transaction ${posTransaction.transactionNumber}, Amount: ${amount}, Wallet updated`)
     } else {

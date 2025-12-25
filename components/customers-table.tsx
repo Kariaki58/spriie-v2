@@ -5,8 +5,7 @@ import {
   IconDotsVertical,
   IconEye,
   IconSearch,
-  IconTrendingUp,
-  IconTrendingDown,
+  IconLoader,
 } from "@tabler/icons-react"
 import {
   ColumnDef,
@@ -60,8 +59,41 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { formatCurrency, formatCurrencyCompact } from "@/lib/utils"
-import { dummyCustomers, type Customer } from "@/lib/customer-data"
-import { dummyOrders } from "@/lib/dummy-data"
+import { toast } from "sonner"
+
+interface Customer {
+  email: string
+  name: string
+  totalOrders: number
+  totalSpent: number
+  productsBought: number
+  averageOrderValue: number
+  status: "active" | "inactive"
+  lastOrderDate: string
+}
+
+interface Order {
+  _id: string
+  orderNumber: string
+  customerName: string
+  customerEmail: string
+  total: number
+  items: Array<{ quantity: number }>
+  status: string
+  paymentStatus: string
+  createdAt: string
+}
+
+interface POSTransaction {
+  _id: string
+  transactionNumber: string
+  customerName?: string
+  customerEmail?: string
+  total: number
+  items: Array<{ quantity: number }>
+  paymentStatus: string
+  createdAt: string
+}
 
 const columns: ColumnDef<Customer>[] = [
   {
@@ -167,11 +199,128 @@ const columns: ColumnDef<Customer>[] = [
 ]
 
 export function CustomersTable() {
-  const [data] = React.useState(dummyCustomers)
+  const [data, setData] = React.useState<Customer[]>([])
+  const [isLoading, setIsLoading] = React.useState(true)
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [searchQuery, setSearchQuery] = React.useState("")
   const [statusFilter, setStatusFilter] = React.useState<string>("all")
+
+  // Fetch customers data from orders and POS transactions
+  React.useEffect(() => {
+    async function fetchCustomers() {
+      try {
+        setIsLoading(true)
+        // Fetch all orders and POS transactions
+        const [ordersRes, posRes] = await Promise.all([
+          fetch("/api/orders?limit=1000"),
+          fetch("/api/pos/transactions?limit=1000"),
+        ])
+
+        const ordersData = await ordersRes.json()
+        const posData = await posRes.json()
+
+        const orders: Order[] = ordersData.success ? ordersData.data || [] : []
+        const posTransactions: POSTransaction[] = posData.success ? posData.data || [] : []
+
+        // Aggregate customer data
+        const customerMap = new Map<string, {
+          email: string
+          name: string
+          orders: Array<{ total: number; items: Array<{ quantity: number }>; createdAt: string }>
+          lastOrderDate: string
+        }>()
+
+        // Process orders
+        orders.forEach((order) => {
+          if (!order.customerEmail || !order.customerName) return
+          
+          if (!customerMap.has(order.customerEmail)) {
+            customerMap.set(order.customerEmail, {
+              email: order.customerEmail,
+              name: order.customerName,
+              orders: [],
+              lastOrderDate: order.createdAt,
+            })
+          }
+
+          const customer = customerMap.get(order.customerEmail)!
+          customer.orders.push({
+            total: order.total || 0,
+            items: order.items || [],
+            createdAt: order.createdAt,
+          })
+
+          // Update last order date if this order is newer
+          if (new Date(order.createdAt) > new Date(customer.lastOrderDate)) {
+            customer.lastOrderDate = order.createdAt
+          }
+        })
+
+        // Process POS transactions
+        posTransactions.forEach((transaction) => {
+          if (!transaction.customerEmail || !transaction.customerName) return
+
+          if (!customerMap.has(transaction.customerEmail)) {
+            customerMap.set(transaction.customerEmail, {
+              email: transaction.customerEmail,
+              name: transaction.customerName,
+              orders: [],
+              lastOrderDate: transaction.createdAt,
+            })
+          }
+
+          const customer = customerMap.get(transaction.customerEmail)!
+          customer.orders.push({
+            total: transaction.total || 0,
+            items: transaction.items || [],
+            createdAt: transaction.createdAt,
+          })
+
+          // Update last order date if this transaction is newer
+          if (new Date(transaction.createdAt) > new Date(customer.lastOrderDate)) {
+            customer.lastOrderDate = transaction.createdAt
+          }
+        })
+
+        // Convert to Customer format
+        const customers: Customer[] = Array.from(customerMap.values()).map((customer) => {
+          const totalOrders = customer.orders.length
+          const totalSpent = customer.orders.reduce((sum, order) => sum + order.total, 0)
+          const productsBought = customer.orders.reduce(
+            (sum, order) => sum + order.items.reduce((itemSum, item) => itemSum + item.quantity, 0),
+            0
+          )
+          const averageOrderValue = totalOrders > 0 ? totalSpent / totalOrders : 0
+
+          // Customer is active if they have an order in the last 90 days
+          const ninetyDaysAgo = new Date()
+          ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
+          const isActive = new Date(customer.lastOrderDate) >= ninetyDaysAgo
+
+          return {
+            email: customer.email,
+            name: customer.name,
+            totalOrders,
+            totalSpent,
+            productsBought,
+            averageOrderValue,
+            status: isActive ? "active" : "inactive",
+            lastOrderDate: customer.lastOrderDate,
+          }
+        })
+
+        setData(customers)
+      } catch (error) {
+        console.error("Error fetching customers:", error)
+        toast.error("Failed to load customers")
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchCustomers()
+  }, [])
 
   const table = useReactTable({
     data,
@@ -207,8 +356,6 @@ export function CustomersTable() {
     const inactiveCustomers = totalCustomers - activeCustomers
     const totalRevenue = data.reduce((sum, c) => sum + c.totalSpent, 0)
     const averageSpent = totalCustomers > 0 ? totalRevenue / totalCustomers : 0
-    const totalProductsBought = data.reduce((sum, c) => sum + c.productsBought, 0)
-    const activePercentage = totalCustomers > 0 ? (activeCustomers / totalCustomers) * 100 : 0
 
     return {
       totalCustomers,
@@ -216,8 +363,6 @@ export function CustomersTable() {
       inactiveCustomers,
       totalRevenue,
       averageSpent,
-      totalProductsBought,
-      activePercentage,
     }
   }, [data])
 
@@ -240,7 +385,7 @@ export function CustomersTable() {
               Total Customers
             </CardDescription>
             <CardTitle className="text-2xl font-bold">
-              {stats.totalCustomers}
+              {isLoading ? "..." : stats.totalCustomers}
             </CardTitle>
           </CardHeader>
         </Card>
@@ -250,7 +395,7 @@ export function CustomersTable() {
               Active Customers
             </CardDescription>
             <CardTitle className="text-2xl font-bold">
-              {stats.activeCustomers}
+              {isLoading ? "..." : stats.activeCustomers}
             </CardTitle>
           </CardHeader>
         </Card>
@@ -260,7 +405,7 @@ export function CustomersTable() {
               Total Revenue
             </CardDescription>
             <CardTitle className="text-2xl font-bold">
-              {formatCurrency(stats.totalRevenue)}
+              {isLoading ? "..." : formatCurrency(stats.totalRevenue)}
             </CardTitle>
           </CardHeader>
         </Card>
@@ -270,7 +415,7 @@ export function CustomersTable() {
               Avg Customer Value
             </CardDescription>
             <CardTitle className="text-2xl font-bold">
-              {formatCurrency(stats.averageSpent)}
+              {isLoading ? "..." : formatCurrency(stats.averageSpent)}
             </CardTitle>
           </CardHeader>
         </Card>
@@ -318,7 +463,19 @@ export function CustomersTable() {
             ))}
           </TableHeader>
           <TableBody>
-            {table.getRowModel().rows?.length ? (
+            {isLoading ? (
+              <TableRow>
+                <TableCell
+                  colSpan={columns.length}
+                  className="h-24 text-center"
+                >
+                  <div className="flex items-center justify-center gap-2">
+                    <IconLoader className="h-4 w-4 animate-spin" />
+                    Loading customers...
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (
                 <TableRow
                   key={row.id}
@@ -353,7 +510,7 @@ export function CustomersTable() {
           variant="outline"
           size="sm"
           onClick={() => table.previousPage()}
-          disabled={!table.getCanPreviousPage()}
+          disabled={!table.getCanPreviousPage() || isLoading}
         >
           Previous
         </Button>
@@ -361,7 +518,7 @@ export function CustomersTable() {
           variant="outline"
           size="sm"
           onClick={() => table.nextPage()}
-          disabled={!table.getCanNextPage()}
+          disabled={!table.getCanNextPage() || isLoading}
         >
           Next
         </Button>
@@ -403,9 +560,61 @@ function CustomerDetailsDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const customerOrders = React.useMemo(() => {
-    return dummyOrders.filter((order) => order.customerEmail === customer.email)
-  }, [customer.email])
+  const [customerOrders, setCustomerOrders] = React.useState<Order[]>([])
+  const [isLoading, setIsLoading] = React.useState(false)
+
+  React.useEffect(() => {
+    if (open) {
+      async function fetchCustomerOrders() {
+        try {
+          setIsLoading(true)
+          // Fetch orders for this customer
+          const [ordersRes, posRes] = await Promise.all([
+            fetch("/api/orders?limit=1000"),
+            fetch("/api/pos/transactions?limit=1000"),
+          ])
+
+          const ordersData = await ordersRes.json()
+          const posData = await posRes.json()
+
+          const orders: Order[] = ordersData.success ? ordersData.data || [] : []
+          const posTransactions: POSTransaction[] = posData.success ? posData.data || [] : []
+
+          // Filter orders by customer email
+          const customerOrdersData = [
+            ...orders.filter((o) => o.customerEmail === customer.email),
+            ...posTransactions
+              .filter((t) => t.customerEmail === customer.email)
+              .map((t) => ({
+                _id: t._id,
+                orderNumber: t.transactionNumber || `POS-${t._id}`,
+                customerName: t.customerName || "Customer",
+                customerEmail: t.customerEmail || "",
+                total: t.total,
+                items: t.items || [],
+                status: "completed",
+                paymentStatus: t.paymentStatus,
+                createdAt: t.createdAt,
+              })) as Order[],
+          ]
+
+          // Sort by date (newest first)
+          customerOrdersData.sort((a, b) => 
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          )
+
+          setCustomerOrders(customerOrdersData)
+        } catch (error) {
+          console.error("Error fetching customer orders:", error)
+          toast.error("Failed to load customer orders")
+        } finally {
+          setIsLoading(false)
+        }
+      }
+
+      fetchCustomerOrders()
+    }
+  }, [open, customer.email])
 
   const initials = customer.name
     .split(" ")
@@ -487,43 +696,53 @@ function CustomerDetailsDialog({
 
           <div>
             <h3 className="font-semibold mb-2">Order History</h3>
-            <div className="space-y-2">
-              {customerOrders.map((order) => (
-                <div
-                  key={order.id}
-                  className="flex items-center justify-between border-b pb-2"
-                >
-                  <div>
-                    <div className="font-medium">{order.orderNumber}</div>
-                    <div className="text-sm text-muted-foreground">
-                      {new Date(order.createdAt).toLocaleDateString("en-US", {
-                        month: "long",
-                        day: "numeric",
-                        year: "numeric",
-                      })} • {order.items.length} items
+            {isLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <IconLoader className="h-4 w-4 animate-spin mr-2" />
+                Loading orders...
+              </div>
+            ) : customerOrders.length === 0 ? (
+              <p className="text-muted-foreground text-center py-8">
+                No orders found for this customer.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {customerOrders.map((order) => (
+                  <div
+                    key={order._id}
+                    className="flex items-center justify-between border-b pb-2"
+                  >
+                    <div>
+                      <div className="font-medium">{order.orderNumber}</div>
+                      <div className="text-sm text-muted-foreground">
+                        {new Date(order.createdAt).toLocaleDateString("en-US", {
+                          month: "long",
+                          day: "numeric",
+                          year: "numeric",
+                        })} • {order.items.length} items
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-semibold">{formatCurrencyCompact(order.total)}</div>
+                      <Badge
+                        className={
+                          order.status === "delivered" || order.status === "completed"
+                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                            : order.status === "pending"
+                            ? "bg-yellow-500/10 text-yellow-700 dark:text-yellow-300"
+                            : "bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                        }
+                      >
+                        {order.status}
+                      </Badge>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="font-semibold">{formatCurrencyCompact(order.total)}</div>
-                    <Badge
-                      className={
-                        order.status === "delivered"
-                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                          : order.status === "pending"
-                          ? "bg-yellow-500/10 text-yellow-700 dark:text-yellow-300"
-                          : "bg-blue-500/10 text-blue-700 dark:text-blue-300"
-                      }
-                    >
-                      {order.status}
-                    </Badge>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </DialogContent>
     </Dialog>
   )
 }
-

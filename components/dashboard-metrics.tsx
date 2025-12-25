@@ -1,7 +1,7 @@
 "use client"
 
 import { IconTrendingDown, IconTrendingUp } from "@tabler/icons-react"
-import { useMemo } from "react"
+import { useMemo, useEffect, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import {
   Card,
@@ -12,88 +12,189 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { cn, formatCurrency } from "@/lib/utils"
-import { dummyOrders, salesData } from "@/lib/dummy-data"
+
+interface Order {
+  _id: string
+  total: number
+  status: string
+  paymentStatus: string
+  customerEmail: string
+  createdAt: string
+}
+
+interface POSTransaction {
+  _id: string
+  total: number
+  paymentStatus: string
+  customerEmail?: string
+  customerName?: string
+  createdAt: string
+}
 
 export function DashboardMetrics() {
+  const [orders, setOrders] = useState<Order[]>([])
+  const [posTransactions, setPosTransactions] = useState<POSTransaction[]>([])
+  const [visitorStats, setVisitorStats] = useState<{
+    totalUniqueVisitors: number
+    growth: number
+  } | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        setIsLoading(true)
+        // Fetch all orders (no pagination limit to get all)
+        const ordersRes = await fetch("/api/orders?limit=1000")
+        const ordersData = await ordersRes.json()
+        if (ordersData.success) {
+          setOrders(ordersData.data || [])
+        }
+
+        // Fetch all POS transactions
+        const posRes = await fetch("/api/pos/transactions?limit=1000")
+        const posData = await posRes.json()
+        if (posData.success) {
+          setPosTransactions(posData.data || [])
+        }
+
+        // Fetch visitor stats (last 7 days)
+        try {
+          const visitorsRes = await fetch("/api/visitors/stats?days=7")
+          const visitorsData = await visitorsRes.json()
+          if (visitorsData.success) {
+            setVisitorStats(visitorsData.data)
+          }
+        } catch (error) {
+          console.error("Error fetching visitor stats:", error)
+          // Don't fail if visitor stats fail, just don't show them
+        }
+      } catch (error) {
+        console.error("Error fetching dashboard data:", error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchData()
+  }, [])
+
   const metrics = useMemo(() => {
-    const totalRevenue = dummyOrders
-      .filter((o) => o.status !== "cancelled")
-      .reduce((sum, order) => sum + order.total, 0)
+    // Combine orders and POS transactions
+    // Orders have both status and paymentStatus, POS transactions only have paymentStatus
+    const allTransactions = [
+      ...orders.map((o) => ({ ...o, type: "order" as const })),
+      ...posTransactions.map((p) => ({ ...p, type: "pos" as const })),
+    ]
 
-    const totalOrders = dummyOrders.length
-    
-    // Calculate total unique customers
-    const uniqueCustomers = new Set(dummyOrders.map(order => order.customerEmail))
-    const totalCustomers = uniqueCustomers.size
+    // Filter out cancelled orders and only include paid transactions
+    // Orders have status field, POS transactions don't
+    const validTransactions = allTransactions.filter((t) => {
+      // Only filter by status if it exists (orders have it, POS transactions don't)
+      const isNotCancelled = !("status" in t) || t.status !== "cancelled"
+      return isNotCancelled && t.paymentStatus === "paid"
+    })
 
-    // Calculate website visitors from sales data
-    const recentSales = salesData.slice(-7)
-    const previousSales = salesData.slice(-14, -7)
-    const totalVisitors = recentSales.reduce((sum, d) => sum + d.views, 0)
-    const previousVisitors = previousSales.reduce((sum, d) => sum + d.views, 0)
-    const visitorsGrowth =
-      previousVisitors > 0
-        ? ((totalVisitors - previousVisitors) / previousVisitors) * 100
-        : 0
+    // Calculate total revenue from paid transactions
+    const totalRevenue = validTransactions.reduce((sum, t) => sum + (t.total || 0), 0)
+
+    // Total orders (both e-commerce and POS)
+    const totalOrders = orders.length + posTransactions.length
+
+    // Calculate unique customers from both sources
+    const customerEmails = new Set<string>()
+    orders.forEach((order) => {
+      if (order.customerEmail) customerEmails.add(order.customerEmail)
+    })
+    posTransactions.forEach((pos) => {
+      if (pos.customerEmail) customerEmails.add(pos.customerEmail)
+    })
+    const totalCustomers = customerEmails.size
+
+    // Calculate growth - compare last 7 days with previous 7 days
+    const now = new Date()
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+    const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)
+
+    const recentTransactions = validTransactions.filter((t) => {
+      const date = new Date(t.createdAt)
+      return date >= sevenDaysAgo
+    })
+
+    const previousTransactions = validTransactions.filter((t) => {
+      const date = new Date(t.createdAt)
+      return date >= fourteenDaysAgo && date < sevenDaysAgo
+    })
+
+    const recentRevenue = recentTransactions.reduce((sum, t) => sum + (t.total || 0), 0)
+    const previousRevenue = previousTransactions.reduce((sum, t) => sum + (t.total || 0), 0)
 
     const salesGrowth =
-      previousSales.reduce((sum, d) => sum + d.sales, 0) > 0
-        ? ((recentSales.reduce((sum, d) => sum + d.sales, 0) -
-            previousSales.reduce((sum, d) => sum + d.sales, 0)) /
-            previousSales.reduce((sum, d) => sum + d.sales, 0)) *
-          100
-        : 0
+      previousRevenue > 0 ? ((recentRevenue - previousRevenue) / previousRevenue) * 100 : 0
 
-    const recentOrders = recentSales.reduce((sum, d) => sum + d.orders, 0)
-    const previousOrders = previousSales.reduce((sum, d) => sum + d.orders, 0)
+    const recentOrderCount = recentTransactions.length
+    const previousOrderCount = previousTransactions.length
+
     const ordersGrowth =
-      previousOrders > 0
-        ? ((recentOrders - previousOrders) / previousOrders) * 100
+      previousOrderCount > 0
+        ? ((recentOrderCount - previousOrderCount) / previousOrderCount) * 100
         : 0
 
     return {
       totalRevenue,
       totalOrders,
       totalCustomers,
-      totalVisitors,
       salesGrowth,
       ordersGrowth,
-      visitorsGrowth,
     }
-  }, [])
+  }, [orders, posTransactions])
 
   const cardData = [
     {
       id: 1,
-      title: formatCurrency(metrics.totalRevenue),
+      title: isLoading ? "Loading..." : formatCurrency(metrics.totalRevenue),
       description: "Total Revenue",
       badge: {
         icon: metrics.salesGrowth >= 0 ? IconTrendingUp : IconTrendingDown,
-        text: `${metrics.salesGrowth >= 0 ? "+" : ""}${metrics.salesGrowth.toFixed(1)}%`,
+        text: isLoading
+          ? "--"
+          : `${metrics.salesGrowth >= 0 ? "+" : ""}${metrics.salesGrowth.toFixed(1)}%`,
         variant: "outline" as const,
       },
-      footerTitle: metrics.salesGrowth >= 0 ? "Sales trending up" : "Sales trending down",
+      footerTitle:
+        isLoading || metrics.salesGrowth === 0
+          ? "No change"
+          : metrics.salesGrowth >= 0
+            ? "Sales trending up"
+            : "Sales trending down",
       footerDescription: "Compared to last week",
       icon: metrics.salesGrowth >= 0 ? IconTrendingUp : IconTrendingDown,
       trend: metrics.salesGrowth >= 0 ? ("up" as const) : ("down" as const),
     },
     {
       id: 2,
-      title: metrics.totalOrders.toString(),
+      title: isLoading ? "Loading..." : metrics.totalOrders.toString(),
       description: "Total Orders",
       badge: {
         icon: metrics.ordersGrowth >= 0 ? IconTrendingUp : IconTrendingDown,
-        text: `${metrics.ordersGrowth >= 0 ? "+" : ""}${metrics.ordersGrowth.toFixed(1)}%`,
+        text: isLoading
+          ? "--"
+          : `${metrics.ordersGrowth >= 0 ? "+" : ""}${metrics.ordersGrowth.toFixed(1)}%`,
         variant: "outline" as const,
       },
-      footerTitle: metrics.ordersGrowth >= 0 ? "Orders increasing" : "Orders decreasing",
+      footerTitle:
+        isLoading || metrics.ordersGrowth === 0
+          ? "No change"
+          : metrics.ordersGrowth >= 0
+            ? "Orders increasing"
+            : "Orders decreasing",
       footerDescription: "Compared to last week",
       icon: metrics.ordersGrowth >= 0 ? IconTrendingUp : IconTrendingDown,
       trend: metrics.ordersGrowth >= 0 ? ("up" as const) : ("down" as const),
     },
     {
       id: 3,
-      title: metrics.totalCustomers.toString(),
+      title: isLoading ? "Loading..." : metrics.totalCustomers.toString(),
       description: "Total Customers",
       badge: {
         icon: IconTrendingUp,
@@ -107,17 +208,39 @@ export function DashboardMetrics() {
     },
     {
       id: 4,
-      title: metrics.totalVisitors.toLocaleString(),
+      title: isLoading
+        ? "Loading..."
+        : visitorStats
+          ? visitorStats.totalUniqueVisitors.toLocaleString()
+          : "0",
       description: "Website Visitors",
       badge: {
-        icon: metrics.visitorsGrowth >= 0 ? IconTrendingUp : IconTrendingDown,
-        text: `${metrics.visitorsGrowth >= 0 ? "+" : ""}${metrics.visitorsGrowth.toFixed(1)}%`,
+        icon:
+          !visitorStats || visitorStats.growth >= 0
+            ? IconTrendingUp
+            : IconTrendingDown,
+        text: isLoading
+          ? "--"
+          : visitorStats
+            ? `${visitorStats.growth >= 0 ? "+" : ""}${visitorStats.growth.toFixed(1)}%`
+            : "--",
         variant: "outline" as const,
       },
-      footerTitle: metrics.visitorsGrowth >= 0 ? "Traffic increasing" : "Traffic decreasing",
+      footerTitle:
+        !visitorStats || visitorStats.growth === 0
+          ? "No change"
+          : visitorStats.growth >= 0
+            ? "Traffic increasing"
+            : "Traffic decreasing",
       footerDescription: "Last 7 days",
-      icon: metrics.visitorsGrowth >= 0 ? IconTrendingUp : IconTrendingDown,
-      trend: metrics.visitorsGrowth >= 0 ? ("up" as const) : ("down" as const),
+      icon:
+        !visitorStats || visitorStats.growth >= 0
+          ? IconTrendingUp
+          : IconTrendingDown,
+      trend:
+        !visitorStats || visitorStats.growth >= 0
+          ? ("up" as const)
+          : ("down" as const),
     },
   ]
 
@@ -130,8 +253,8 @@ export function DashboardMetrics() {
           const isTrendingUp = card.trend === "up"
 
           return (
-            <Card 
-              key={card.id} 
+            <Card
+              key={card.id}
               className="@container/card transition-all hover:shadow-md border"
             >
               <CardHeader>
@@ -176,4 +299,3 @@ export function DashboardMetrics() {
     </div>
   )
 }
-

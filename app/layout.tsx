@@ -5,6 +5,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeProvider as StoreThemeProvider } from "@/contexts/theme-context";
 import { Toaster } from "@/components/ui/sonner";
 import { SessionProvider } from "@/components/session-provider";
+import { VisitorTracker } from "@/components/visitor-tracker";
 
 
 const geistSans = Geist({
@@ -35,6 +36,7 @@ export default function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <StoreThemeProvider>
             <SessionProvider>
+              <VisitorTracker />
               {children}
               <Toaster />
             </SessionProvider>

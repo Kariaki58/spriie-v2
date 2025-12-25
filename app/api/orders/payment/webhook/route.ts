@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import dbConnect from "@/lib/db"
 import Order from "@/lib/models/order"
+import { updateProductSoldCount } from "@/lib/product-updates"
 
 export async function POST(req: NextRequest) {
   try {
@@ -36,13 +37,32 @@ export async function POST(req: NextRequest) {
 
       // Verify transaction status
       if (transaction.status === "successful" && transaction.amount === order.total) {
-        // Update order payment status
-        order.paymentStatus = "paid"
-        order.flutterwaveReference = transaction.tx_ref || transaction.flw_ref
-        order.status = "processing" // Move to processing after payment
-        await order.save()
+        // Only update if not already paid (to prevent double-counting)
+        if (order.paymentStatus !== "paid") {
+          // Update order payment status
+          order.paymentStatus = "paid"
+          order.flutterwaveReference = transaction.tx_ref || transaction.flw_ref
+          order.status = "processing" // Move to processing after payment
+          await order.save()
 
-        console.log(`Order ${order.orderNumber} marked as paid`)
+          // Update product sold counts and stock
+          try {
+            const itemsToUpdate = order.items.map((item: any) => ({
+              productId: item.product,
+              quantity: item.quantity,
+              variant: item.variant,
+              price: item.price,
+            }))
+            await updateProductSoldCount(itemsToUpdate)
+          } catch (error) {
+            console.error("Error updating product sold counts:", error)
+            // Don't fail the webhook if product update fails
+          }
+
+          console.log(`Order ${order.orderNumber} marked as paid`)
+        } else {
+          console.log(`Order ${order.orderNumber} already marked as paid`)
+        }
       }
     }
 

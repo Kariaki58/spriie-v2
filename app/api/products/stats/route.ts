@@ -10,7 +10,20 @@ export async function GET() {
     // Calculate statistics
     const totalProducts = products.length
     const totalRevenue = products.reduce((sum, p) => sum + (p.revenue || 0), 0)
-    const lowStockCount = products.filter(p => p.stock < 20).length
+    
+    // Calculate low stock count - count individual items (variants or products)
+    // If product has variants, count each low stock variant separately
+    // If product has no variants, count the product itself
+    const lowStockCount = products.reduce((count, p) => {
+      if (p.variants && p.variants.length > 0) {
+        // Count each variant with low stock (< 20)
+        const lowStockVariants = p.variants.filter(variant => (variant.stock || 0) < 20)
+        return count + lowStockVariants.length
+      } else {
+        // No variants, check product stock - count as 1 if low stock
+        return (p.stock || 0) < 20 ? count + 1 : count
+      }
+    }, 0)
     
     // Calculate total inventory value - handle variants properly
     const totalInventoryValue = products.reduce((sum, p) => {

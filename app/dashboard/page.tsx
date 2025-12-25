@@ -2,7 +2,6 @@ import { AppSidebar } from "@/components/app-sidebar"
 import { DashboardMetrics } from "@/components/dashboard-metrics"
 import { SalesChart } from "@/components/sales-chart"
 import { ConversionChart } from "@/components/conversion-chart"
-import { ProductViewsChart } from "@/components/product-views-chart"
 import { SiteHeader } from "@/components/site-header"
 import {
   SidebarInset,
@@ -29,9 +28,6 @@ export default function Page() {
               <div className="grid grid-cols-1 gap-4 px-4 lg:grid-cols-2 lg:px-6">
                 <SalesChart />
                 <ConversionChart />
-              </div>
-              <div className="px-4 lg:px-6">
-                <ProductViewsChart />
               </div>
             </div>
           </div>

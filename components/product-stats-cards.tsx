@@ -4,7 +4,9 @@ import * as React from "react"
 import { IconPackage, IconCurrencyNaira, IconAlertTriangle, IconChartBar } from "@tabler/icons-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@/components/ui/button"
 import { formatCurrency, formatCurrencyCompact } from "@/lib/utils"
+import { LowStockDialog } from "@/components/low-stock-dialog"
 
 interface ProductStats {
   totalProducts: number
@@ -16,6 +18,7 @@ interface ProductStats {
 export function ProductStatsCards() {
   const [stats, setStats] = React.useState<ProductStats | null>(null)
   const [isLoading, setIsLoading] = React.useState(true)
+  const [lowStockDialogOpen, setLowStockDialogOpen] = React.useState(false)
 
   React.useEffect(() => {
     const fetchStats = async () => {
@@ -91,28 +94,42 @@ export function ProductStatsCards() {
   ]
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-      {cards.map((card) => {
-        const Icon = card.icon
-        return (
-          <Card key={card.title}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                {card.title}
-              </CardTitle>
-              <div className={`p-2 rounded-full ${card.bgColor}`}>
-                <Icon className={`h-4 w-4 ${card.color}`} />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{card.value}</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {card.description}
-              </p>
-            </CardContent>
-          </Card>
-        )
-      })}
-    </div>
+    <>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {cards.map((card) => {
+          const Icon = card.icon
+          const isLowStockCard = card.title === "Low Stock Alert"
+          
+          return (
+            <Card key={card.title}>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">
+                  {card.title}
+                </CardTitle>
+                <div className={`p-2 rounded-full ${card.bgColor}`}>
+                  <Icon className={`h-4 w-4 ${card.color}`} />
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{card.value}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {card.description}
+                </p>
+                {isLowStockCard && stats.lowStockCount > 0 && (
+                  <Button
+                    variant="link"
+                    className="p-0 h-auto mt-2 text-xs text-orange-600 hover:text-orange-700"
+                    onClick={() => setLowStockDialogOpen(true)}
+                  >
+                    View all →
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
+      <LowStockDialog open={lowStockDialogOpen} onOpenChange={setLowStockDialogOpen} />
+    </>
   )
 }

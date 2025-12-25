@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import dbConnect from "@/lib/db"
 import POSTransaction from "@/lib/models/pos-transaction"
+import { updateProductSoldCount } from "@/lib/product-updates"
 
 export async function GET(req: NextRequest) {
   try {
@@ -133,6 +134,22 @@ export async function POST(req: NextRequest) {
       user: (session as any).userId,
       paidAt: paymentMethod === "cash" ? new Date() : undefined,
     })
+
+    // If cash payment, update product sold counts immediately
+    if (paymentMethod === "cash") {
+      try {
+        const itemsToUpdate = items.map((item: any) => ({
+          productId: item.productId,
+          quantity: item.quantity,
+          variant: item.variant,
+          price: item.price,
+        }))
+        await updateProductSoldCount(itemsToUpdate)
+      } catch (error) {
+        console.error("Error updating product sold counts for cash payment:", error)
+        // Don't fail the transaction if product update fails
+      }
+    }
 
     return NextResponse.json(
       { success: true, data: transaction },
