@@ -81,6 +81,12 @@ export async function GET(req: NextRequest) {
         ? ((uniqueVisitors.length - previousUniqueVisitors.length) / previousUniqueVisitors.length) * 100
         : 0
 
+    // Calculate active online users (users who visited in the last 15 minutes)
+    const activeTimeThreshold = new Date(now.getTime() - 15 * 60 * 1000) // 15 minutes ago
+    const activeVisitors = await Visitor.distinct("visitorId", {
+      timestamp: { $gte: activeTimeThreshold },
+    })
+
     return NextResponse.json({
       success: true,
       data: {
@@ -88,6 +94,7 @@ export async function GET(req: NextRequest) {
         totalPageViews,
         growth,
         visitorsByDate,
+        activeOnlineUsers: activeVisitors.length,
       },
     })
   } catch (error: any) {

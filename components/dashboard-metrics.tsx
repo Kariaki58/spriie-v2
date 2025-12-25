@@ -1,6 +1,6 @@
 "use client"
 
-import { IconTrendingDown, IconTrendingUp } from "@tabler/icons-react"
+import { IconTrendingDown, IconTrendingUp, IconLoader2 } from "@tabler/icons-react"
 import { useMemo, useEffect, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { cn, formatCurrency } from "@/lib/utils"
+import { useActiveUsers } from "@/components/active-users"
 
 interface Order {
   _id: string
@@ -37,8 +38,10 @@ export function DashboardMetrics() {
   const [visitorStats, setVisitorStats] = useState<{
     totalUniqueVisitors: number
     growth: number
+    activeOnlineUsers: number
   } | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const { count: realtimeActiveUsers, isConnected: isRealtimeConnected } = useActiveUsers()
 
   useEffect(() => {
     async function fetchData() {
@@ -152,7 +155,9 @@ export function DashboardMetrics() {
   const cardData = [
     {
       id: 1,
-      title: isLoading ? "Loading..." : formatCurrency(metrics.totalRevenue),
+      title: isLoading ? (
+        <IconLoader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      ) : formatCurrency(metrics.totalRevenue),
       description: "Total Revenue",
       badge: {
         icon: metrics.salesGrowth >= 0 ? IconTrendingUp : IconTrendingDown,
@@ -173,7 +178,9 @@ export function DashboardMetrics() {
     },
     {
       id: 2,
-      title: isLoading ? "Loading..." : metrics.totalOrders.toString(),
+      title: isLoading ? (
+        <IconLoader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      ) : metrics.totalOrders.toString(),
       description: "Total Orders",
       badge: {
         icon: metrics.ordersGrowth >= 0 ? IconTrendingUp : IconTrendingDown,
@@ -194,7 +201,9 @@ export function DashboardMetrics() {
     },
     {
       id: 3,
-      title: isLoading ? "Loading..." : metrics.totalCustomers.toString(),
+      title: isLoading ? (
+        <IconLoader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      ) : metrics.totalCustomers.toString(),
       description: "Total Customers",
       badge: {
         icon: IconTrendingUp,
@@ -209,10 +218,12 @@ export function DashboardMetrics() {
     {
       id: 4,
       title: isLoading
-        ? "Loading..."
-        : visitorStats
-          ? visitorStats.totalUniqueVisitors.toLocaleString()
-          : "0",
+        ? <IconLoader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        : realtimeActiveUsers !== null && isRealtimeConnected
+          ? `${realtimeActiveUsers}`
+          : visitorStats
+            ? (visitorStats.totalUniqueVisitors ?? 0).toLocaleString()
+            : "0",
       description: "Website Visitors",
       badge: {
         icon:
@@ -232,7 +243,11 @@ export function DashboardMetrics() {
           : visitorStats.growth >= 0
             ? "Traffic increasing"
             : "Traffic decreasing",
-      footerDescription: "Last 7 days",
+      footerDescription: realtimeActiveUsers !== null && isRealtimeConnected
+        ? `${realtimeActiveUsers} active online now • ${visitorStats?.totalUniqueVisitors ?? 0} total (7 days)`
+        : visitorStats
+          ? `${visitorStats.activeOnlineUsers ?? 0} active online • Last 7 days`
+          : "0 active online • Last 7 days",
       icon:
         !visitorStats || visitorStats.growth >= 0
           ? IconTrendingUp
@@ -246,7 +261,63 @@ export function DashboardMetrics() {
 
   return (
     <div className="px-2 lg:px-6">
-      <div className="grid grid-cols-1 gap-4 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
+      {/* Mobile: Horizontal carousel */}
+      <div className="flex gap-4 overflow-x-auto scrollbar-hide pb-2 sm:hidden">
+        {cardData.map((card) => {
+          const BadgeIcon = card.badge.icon
+          const FooterIcon = card.icon
+          const isTrendingUp = card.trend === "up"
+
+          return (
+            <Card
+              key={card.id}
+              className="@container/card transition-all hover:shadow-md border min-w-[280px] flex-shrink-0"
+            >
+              <CardHeader>
+                <CardDescription className="text-sm font-medium text-muted-foreground">
+                  {card.description}
+                </CardDescription>
+                <CardTitle className="text-2xl font-bold">
+                  {card.title}
+                </CardTitle>
+                <CardAction>
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "gap-1.5 font-medium",
+                      isTrendingUp
+                        ? "text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                        : "text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800"
+                    )}
+                  >
+                    <BadgeIcon className="size-4" />
+                    {card.badge.text}
+                  </Badge>
+                </CardAction>
+              </CardHeader>
+              <CardFooter className="flex-col items-start gap-1 text-sm">
+                <div className="flex items-center gap-2 font-medium">
+                  <FooterIcon
+                    className={cn(
+                      "size-4",
+                      isTrendingUp
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-rose-600 dark:text-rose-400"
+                    )}
+                  />
+                  <span>{card.footerTitle}</span>
+                </div>
+                <div className="text-muted-foreground text-sm">
+                  {card.footerDescription}
+                </div>
+              </CardFooter>
+            </Card>
+          )
+        })}
+      </div>
+      
+      {/* Desktop: Grid layout */}
+      <div className="hidden sm:grid grid-cols-1 gap-4 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
         {cardData.map((card) => {
           const BadgeIcon = card.badge.icon
           const FooterIcon = card.icon
@@ -291,6 +362,9 @@ export function DashboardMetrics() {
                   />
                   <span>{card.footerTitle}</span>
                 </div>
+                <div className="text-muted-foreground text-sm">
+                  {card.footerDescription}
+                </div>
               </CardFooter>
             </Card>
           )
@@ -299,3 +373,4 @@ export function DashboardMetrics() {
     </div>
   )
 }
+

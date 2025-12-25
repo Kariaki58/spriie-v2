@@ -48,6 +48,17 @@ export default function ProductPage() {
 
         if (data.success && data.product) {
           setProduct(data.product)
+          
+          // Track product view
+          fetch(`/api/products/${productId}/view`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          }).catch((error) => {
+            // Silently fail - product view tracking shouldn't break the page
+            console.error("Failed to track product view:", error)
+          })
         } else {
           toast.error("Product not found")
           router.push("/")
